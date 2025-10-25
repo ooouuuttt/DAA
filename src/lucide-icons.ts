@@ -12,5 +12,7 @@ export {
     Plus,
     Minus,
     Users,
-    Warehouse
+    Warehouse,
+    Trash2,
+    UserPlus,
 } from 'lucide-react';
