@@ -177,7 +177,7 @@ export default function CheckoutPage() {
        <div>
         <h1 className="text-4xl font-bold font-headline">Logistics Control Panel</h1>
         <p className="mt-2 text-lg text-muted-foreground">
-          Simulate a real-world delivery backend. Create orders and see how different logistics strategies work.
+          Simulate and compare real-world delivery backend strategies.
         </p>
       </div>
 
@@ -212,13 +212,15 @@ export default function CheckoutPage() {
             {combinedResult && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>Optimization Results Breakdown</CardTitle>
+                        <CardTitle>Optimization Results: A Tale of Two Strategies</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6 text-sm">
 
                         <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200">
-                             <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Separate Shipments for Each Order (Fastest Delivery)</h4>
-                            <p className="text-xs text-muted-foreground mb-3">Like Amazon, each customer's order is split into multiple shipments to get items to them as fast as possible. Each part ships directly from its warehouse to the customer's address.</p>
+                             <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Prioritize Speed (The Amazon Model)</h4>
+                            <p className="text-xs text-muted-foreground mb-3">
+                              This model's goal is to get every item to its customer as fast as possible, ignoring truck efficiency. Each part of an order ships separately and directly from its warehouse. Notice how if two users order from the same warehouse, the system calculates two separate, independent trips.
+                            </p>
                              {combinedResult.allOrderShipments.length > 0 ? (
                                 combinedResult.allOrderShipments.map((order, orderIndex) => (
                                      <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
@@ -247,11 +249,12 @@ export default function CheckoutPage() {
                         </div>
                         
                         <div className="p-4 bg-muted/50 rounded-lg">
-                            <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Strategy 2: Consolidated Shipping for All Orders (Fewer Trucks)</h4>
-                            <p className="text-xs text-muted-foreground mb-3">A single truck serves all orders (yours and other customers'). It starts at the central depot ({nodeMap.get('warehouse-a')?.name}), visits the necessary warehouses to pick up all items, delivers to all customers, then returns.</p>
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Strategy 2: Prioritize Efficiency (The Local Delivery Model)</h4>
+                            <p className="text-xs text-muted-foreground mb-3">This model's goal is to use as few trucks as possible. A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything for everyone, delivers to all customers on an optimized route, and finally returns to the depot.
+                            </p>
                             
                             <div className="space-y-3">
-                                <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Warehouse Pickup Manifest:</h5>
+                                <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Central Pickup Manifest:</h5>
                                 {Object.keys(combinedResult.warehouseManifest).length > 0 ? (
                                     Object.entries(combinedResult.warehouseManifest).map(([whId, items]) => (
                                         <div key={whId} className="pl-4 border-l-2 ml-2">
@@ -259,7 +262,7 @@ export default function CheckoutPage() {
                                             <ul className="text-xs list-disc pl-5 text-muted-foreground">
                                                 {items.map((item, index) => (
                                                     <li key={index}>
-                                                        <span className="font-semibold">{item.productName}</span> for order <span className="font-semibold text-primary/80">{item.orderId}</span>
+                                                        Pick up <span className="font-semibold">{item.productName}</span> for order <span className="font-semibold text-primary/80">{item.orderId}</span>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -275,19 +278,19 @@ export default function CheckoutPage() {
                             {combinedResult.tspResult ? (
                                 <div className="space-y-2">
                                     <p><strong>Total Consolidated Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
-                                    <p><strong>Consolidated Route:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                    <p><strong>Optimized Route for One Truck:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                                 </div>
                             ) : <p>Not enough stops for a TSP route.</p>}
                         </div>
 
                          <div className="p-4 bg-muted/50 rounded-lg">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
-                            <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your main order.</p>
+                            <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your main order. It helps find bottlenecks.</p>
                             <div >
                                 <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
                                 {combinedResult.maxFlowToFirstCustomer !== null ? (
                                     <>
-                                        <p>This shows the maximum number of packages that could possibly be moved between the closest warehouse and your address per hour, if all roads were used optimally. It helps identify network bottlenecks.</p>
+                                        <p>This shows the maximum number of packages that could possibly be moved between the closest warehouse and your address per hour, if all roads were used optimally.</p>
                                         <p><strong>Max Capacity:</strong> {combinedResult.maxFlowToFirstCustomer} packages/hour</p>
                                     </>
                                 ) : <p>Your cart is empty. No capacity to calculate.</p>}
@@ -301,6 +304,8 @@ export default function CheckoutPage() {
     </div>
   );
 }
+
+    
 
     
 
