@@ -10,5 +10,6 @@ export {
     PlusCircle,
     X,
     Plus,
-    Minus
+    Minus,
+    Users
 } from 'lucide-react';

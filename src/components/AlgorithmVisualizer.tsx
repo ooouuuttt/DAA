@@ -23,8 +23,10 @@ import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, MapPin } from 'lucide-react';
+import { Route, Truck, Zap, Combine, MapPin, Package, Users } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from './ui/checkbox';
+import { Label } from './ui/label';
 
 type DijkstraResult = { path: string[]; distance: number } | null;
 type TspResult = { path: string[]; distance: number } | null;
@@ -34,7 +36,14 @@ type CombinedResult = {
   shortestPath: DijkstraResult;
   maxFlow: MaxFlowResult;
   requiredWarehouses: string[];
+  allStops: string[];
 };
+
+const otherDeliveries = [
+  { id: 'user2', address: 'loc15', items: ['prod_2'] },
+  { id: 'user3', address: 'loc4', items: ['prod_6'] },
+];
+
 
 export default function AlgorithmVisualizer() {
   const { items: cartItems } = useCart();
@@ -44,6 +53,7 @@ export default function AlgorithmVisualizer() {
   const [startNode, setStartNode] = useState<string>('warehouse-a');
   const [endNode, setEndNode] = useState<string>('loc5');
   const [deliveryAddress, setDeliveryAddress] = useState<string>('loc10');
+  const [includeOtherDeliveries, setIncludeOtherDeliveries] = useState(true);
 
   // Result states
   const [dijkstraResult, setDijkstraResult] = useState<DijkstraResult>(null);
@@ -57,11 +67,6 @@ export default function AlgorithmVisualizer() {
     return Array.from(locations);
   }, [cartItems]);
 
-  const requiredWarehouses = useMemo(() => {
-    const warehouseIds = new Set(cartItems.map(item => item.warehouseId));
-    return Array.from(warehouseIds);
-  }, [cartItems]);
-
   const runDijkstra = () => {
     const result = dijkstra(allNodes, allEdges, startNode, endNode);
     setDijkstraResult(result);
@@ -70,8 +75,11 @@ export default function AlgorithmVisualizer() {
   };
 
   const runTsp = () => {
-    if (deliveryLocations.length > 0) {
-      const result = solveTsp(allNodes, allEdges, startNode, deliveryLocations);
+    if (cartItems.length > 0) {
+      // For this tab, we only consider the user's cart items
+      const userWarehouses = Array.from(new Set(cartItems.map(item => item.warehouseId)));
+      const userStops = [...userWarehouses, deliveryAddress];
+      const result = solveTsp(allNodes, allEdges, 'warehouse-a', userStops);
       setTspResult(result);
       setDijkstraResult(null);
       setCombinedResult(null);
@@ -86,32 +94,64 @@ export default function AlgorithmVisualizer() {
   };
   
   const runCombined = () => {
-    if (requiredWarehouses.length === 0) {
-      setCombinedResult(null);
-      return;
+    const currentUserOrder = {
+        id: 'main-user',
+        address: deliveryAddress,
+        items: cartItems.map(i => i.id)
+    };
+
+    let allOrders = [currentUserOrder];
+    if (includeOtherDeliveries) {
+        allOrders = [...allOrders, ...otherDeliveries];
     }
-    // 1. TSP from a central depot to all required warehouses then to the customer
-    const tspStops = [...requiredWarehouses, deliveryAddress];
+    
+    if (allOrders.every(o => o.items.length === 0)) {
+        setCombinedResult(null);
+        return;
+    }
+
+    const allRequiredWarehouses = new Set<string>();
+    cartItems.forEach(item => allRequiredWarehouses.add(item.warehouseId));
+    if(includeOtherDeliveries) {
+      // This is a simplified lookup. In a real app, you'd fetch product details.
+      const allProducts = require('@/lib/products').products;
+      otherDeliveries.forEach(order => {
+        order.items.forEach(itemId => {
+          const product = allProducts.find((p: any) => p.id === itemId);
+          if (product) {
+            allRequiredWarehouses.add(product.warehouseId);
+          }
+        });
+      });
+    }
+
+    const allDeliveryAddresses = new Set<string>(allOrders.map(o => o.address));
+    
+    // 1. TSP from a central depot to all required warehouses then to all customers.
+    const tspStops = [...allRequiredWarehouses, ...allDeliveryAddresses];
     const tspResult = solveTsp(allNodes, allEdges, 'warehouse-a', tspStops);
 
-    // 2. Simple shortest path from the nearest warehouse to the customer
+    // 2. Simple shortest path for *your* delivery from the nearest warehouse.
     let nearestWarehouse = '';
     let minDistance = Infinity;
     let shortestPath: DijkstraResult = null;
 
-    requiredWarehouses.forEach(wh => {
-        const path = dijkstra(allNodes, allEdges, wh, deliveryAddress);
-        if (path && path.distance < minDistance) {
-            minDistance = path.distance;
-            nearestWarehouse = wh;
-            shortestPath = path;
-        }
-    });
+    const userWarehouses = new Set(cartItems.map(item => item.warehouseId));
+    if (userWarehouses.size > 0) {
+        userWarehouses.forEach(wh => {
+            const path = dijkstra(allNodes, allEdges, wh, deliveryAddress);
+            if (path && path.distance < minDistance) {
+                minDistance = path.distance;
+                nearestWarehouse = wh;
+                shortestPath = path;
+            }
+        });
+    }
 
-    // 3. Max flow from the nearest warehouse to the customer
-    const maxFlow = edmondsKarp(allNodes, allEdges, nearestWarehouse, deliveryAddress);
+    // 3. Max flow from the nearest warehouse to *your* location.
+    const maxFlow = nearestWarehouse ? edmondsKarp(allNodes, allEdges, nearestWarehouse, deliveryAddress) : null;
 
-    setCombinedResult({ tspResult, shortestPath, maxFlow, requiredWarehouses });
+    setCombinedResult({ tspResult, shortestPath, maxFlow, requiredWarehouses: Array.from(allRequiredWarehouses), allStops: tspStops });
     setDijkstraResult(null);
     setTspResult(null);
   }
@@ -125,14 +165,18 @@ export default function AlgorithmVisualizer() {
 
   const mapHighlights = useMemo(() => {
     if (activeTab === 'combined' && combinedResult) {
-      const nodes = new Set([...combinedResult.requiredWarehouses, deliveryAddress, 'warehouse-a']);
-      if(combinedResult.shortestPath) {
-        combinedResult.shortestPath.path.forEach(n => nodes.add(n));
+      const nodes = new Set([...combinedResult.requiredWarehouses, deliveryAddress, 'warehouse-a', ...combinedResult.allStops]);
+       if(includeOtherDeliveries) {
+        otherDeliveries.forEach(d => nodes.add(d.address));
       }
-       return Array.from(nodes);
+      return Array.from(nodes);
+    }
+    if (activeTab === 'tsp' && tspResult) {
+       const userWarehouses = Array.from(new Set(cartItems.map(item => item.warehouseId)));
+       return [...userWarehouses, deliveryAddress, 'warehouse-a'];
     }
     return [];
-  }, [activeTab, combinedResult]);
+  }, [activeTab, combinedResult, tspResult, includeOtherDeliveries, deliveryAddress, cartItems]);
 
   return (
     <Card>
@@ -141,28 +185,105 @@ export default function AlgorithmVisualizer() {
           <div className="p-6 border-b md:border-b-0 md:border-r">
             <TabsList className="grid grid-cols-1 h-auto">
                <TabsTrigger value="combined" className="py-3 justify-start gap-3">
-                <Combine /> Combined Optimization
-              </TabsTrigger>
-              <TabsTrigger value="dijkstra" className="py-3 justify-start gap-3">
-                <Route /> Dijkstra's Shortest Path
+                <Combine /> Full Logistics Demo
               </TabsTrigger>
               <TabsTrigger value="tsp" className="py-3 justify-start gap-3">
-                <Truck /> TSP Route Optimization
+                <Truck /> Your Route (TSP)
+              </TabsTrigger>
+              <TabsTrigger value="dijkstra" className="py-3 justify-start gap-3">
+                <Route /> Shortest Path (Dijkstra)
               </TabsTrigger>
               <TabsTrigger value="max-flow" className="py-3 justify-start gap-3">
-                <Zap /> Max-Flow Capacity
+                <Zap /> Network Capacity
               </TabsTrigger>
             </TabsList>
           </div>
           <div className="md:col-span-2 p-6">
             <TabsContent value="combined" className="mt-0 space-y-4">
-              <CardTitle>Combined Delivery Optimization</CardTitle>
+              <CardTitle>Full Logistics Simulation (like Amazon)</CardTitle>
               <CardDescription className="mt-1 mb-4">
-                This simulation shows a complete logistics plan. It finds the optimal route for a truck to pick up all your items from different warehouses and deliver them to your address.
+                This simulates a full delivery batch. A truck starts at a central depot, visits all necessary warehouses to collect items for multiple customers, delivers all packages, and returns.
               </CardDescription>
-               <div className="flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium">Delivery Address:</span>
+               <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                    <MapPin className="w-5 h-5 text-muted-foreground" />
+                    <span className="font-medium">Your Address:</span>
+                    <Select value={deliveryAddress} onValueChange={setDeliveryAddress}>
+                    <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Select address" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {allNodes.filter(n => !n.id.includes('warehouse')).map(n => (
+                        <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
+                        ))}
+                    </SelectContent>
+                    </Select>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <Checkbox id="include-others" checked={includeOtherDeliveries} onCheckedChange={(checked) => setIncludeOtherDeliveries(Boolean(checked))} />
+                  <Label htmlFor="include-others" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    Include other users' deliveries
+                  </Label>
+                </div>
+              </div>
+              <Button onClick={runCombined} disabled={cartItems.length === 0 && !includeOtherDeliveries}>Optimize Full Delivery Batch</Button>
+               {(cartItems.length === 0 && !includeOtherDeliveries) && <p className="text-sm text-muted-foreground mt-2">Add items to your cart or include other deliveries to run a simulation.</p>}
+               
+               {combinedResult && (
+                <div className="space-y-4 text-sm">
+                    <p><strong>Warehouses to Visit:</strong> <span className="font-code">{combinedResult.requiredWarehouses.join(', ') || 'None'}</span></p>
+                    <Separator />
+                    
+                    <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Batched Delivery Route (TSP)</h4>
+                        {combinedResult.tspResult ? (
+                            <>
+                                <p>A single truck serves all orders. It starts at warehouse-a, visits required warehouses, delivers to all customers, then returns.</p>
+                                <p><strong>Total Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
+                                <p><strong>Optimized Route:</strong> <span className="font-code">{combinedResult.tspResult.path.join(' -> ')}</span></p>
+                            </>
+                        ) : <p>Not enough stops for a TSP route.</p>}
+                    </div>
+
+                    <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-bold mb-2 flex items-center gap-2"><Route size={16}/> Your Quickest Path (Dijkstra)</h4>
+                        {combinedResult.shortestPath ? (
+                            <>
+                                <p>If we only shipped your order, the fastest single delivery would be from the nearest warehouse.</p>
+                                <p><strong>Distance:</strong> {combinedResult.shortestPath.distance.toFixed(2)} km</p>
+                                <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPath.path.join(' -> ')}</span></p>
+                            </>
+                        ) : <p>Your cart is empty. No direct path to calculate.</p>}
+                    </div>
+
+                    <div className="p-4 bg-muted/50 rounded-lg">
+                        <h4 className="font-bold mb-2 flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h4>
+                         {combinedResult.maxFlow !== null ? (
+                            <>
+                                <p>Maximum package throughput to your location from the nearest relevant warehouse.</p>
+                                <p><strong>Max Packages:</strong> {combinedResult.maxFlow} units</p>
+                            </>
+                        ) : <p>Your cart is empty. No capacity to calculate.</p>}
+                    </div>
+                </div>
+               )}
+
+            </TabsContent>
+             <TabsContent value="tsp" className="mt-0">
+              <CardTitle>Your Optimized Multi-Item Route</CardTitle>
+              <CardDescription className="mt-1 mb-4">Calculates the most efficient route for a truck to pick up all items *in your cart* from different warehouses and deliver them to you.</CardDescription>
+               <div className="flex gap-2 mb-4 items-center">
+                 <Select value={startNode} onValueChange={(val) => setStartNode(val)}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Select start" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allNodes.filter(n => n.id.includes('warehouse')).map(n => (
+                      <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                 <span className="text-muted-foreground">to your address at</span>
                  <Select value={deliveryAddress} onValueChange={setDeliveryAddress}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Select address" />
@@ -174,52 +295,19 @@ export default function AlgorithmVisualizer() {
                   </SelectContent>
                 </Select>
               </div>
-              <Button onClick={runCombined} disabled={cartItems.length === 0}>Optimize Full Delivery</Button>
-               {cartItems.length === 0 && <p className="text-sm text-muted-foreground mt-2">Add items to your cart to run a combined optimization.</p>}
-               
-               {combinedResult && (
-                <div className="space-y-4 text-sm">
-                    <p><strong>Required Warehouses:</strong> <span className="font-code">{combinedResult.requiredWarehouses.join(', ') || 'None'}</span></p>
-                    <Separator />
-                    
-                    <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Full Tour (TSP)</h4>
-                        {combinedResult.tspResult ? (
-                            <>
-                                <p>A truck starting at warehouse-a will visit all required warehouses and then your location.</p>
-                                <p><strong>Total Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
-                                <p><strong>Route:</strong> <span className="font-code">{combinedResult.tspResult.path.join(' -> ')}</span></p>
-                            </>
-                        ) : <p>Not enough stops for a TSP route.</p>}
-                    </div>
-
-                    <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-bold mb-2 flex items-center gap-2"><Route size={16}/> Direct Path (Dijkstra)</h4>
-                        {combinedResult.shortestPath ? (
-                            <>
-                                <p>The fastest single-package delivery would be from the nearest warehouse.</p>
-                                <p><strong>Distance:</strong> {combinedResult.shortestPath.distance.toFixed(2)} km</p>
-                                <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPath.path.join(' -> ')}</span></p>
-                            </>
-                        ) : <p>Could not calculate a direct path.</p>}
-                    </div>
-
-                    <div className="p-4 bg-muted/50 rounded-lg">
-                        <h4 className="font-bold mb-2 flex items-center gap-2"><Zap size={16}/> Network Capacity (Max-Flow)</h4>
-                         {combinedResult.maxFlow !== null ? (
-                            <>
-                                <p>Maximum package throughput to your location from the nearest warehouse.</p>
-                                <p><strong>Max Packages:</strong> {combinedResult.maxFlow} units</p>
-                            </>
-                        ) : <p>Could not calculate max-flow.</p>}
-                    </div>
+               <Button onClick={runTsp} disabled={cartItems.length === 0}>Optimize My Cart Delivery</Button>
+              {cartItems.length === 0 && <p className="text-sm text-muted-foreground mt-2">Add items from different warehouses to your cart to plan a delivery route.</p>}
+              {tspResult && (
+                <div className="text-sm mt-4">
+                  <p><strong>Required Warehouses:</strong> {Array.from(new Set(cartItems.map(item => item.warehouseId))).join(', ')}</p>
+                  <p><strong>Total Distance:</strong> {tspResult.distance.toFixed(2)} km</p>
+                  <p><strong>Route:</strong> <span className="font-code">{tspResult.path.join(' -> ')}</span></p>
                 </div>
-               )}
-
+              )}
             </TabsContent>
             <TabsContent value="dijkstra" className="mt-0">
               <CardTitle>Shortest Delivery Path</CardTitle>
-              <CardDescription className="mt-1 mb-4">Find the single fastest route from a start point to a destination using Dijkstra's algorithm.</CardDescription>
+              <CardDescription className="mt-1 mb-4">Find the single fastest route from a start point to a destination using Dijkstra's algorithm. This is ideal for one package from one location.</CardDescription>
               <div className="flex gap-2 mb-4 items-center">
                 <Select value={startNode} onValueChange={setStartNode}>
                   <SelectTrigger className="w-[180px]">
@@ -251,33 +339,9 @@ export default function AlgorithmVisualizer() {
                 </div>
               )}
             </TabsContent>
-            <TabsContent value="tsp" className="mt-0">
-              <CardTitle>Optimized Multi-Stop Route</CardTitle>
-              <CardDescription className="mt-1 mb-4">Calculate the most efficient route to deliver all items in your cart from a warehouse using a Traveling Salesman Problem (TSP) heuristic.</CardDescription>
-               <div className="flex gap-2 mb-4 items-center">
-                 <Select value={startNode} onValueChange={setStartNode}>
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Select start" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allNodes.filter(n => n.id.includes('warehouse')).map(n => (
-                      <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={runTsp} disabled={deliveryLocations.length === 0}>Optimize Cart Delivery</Button>
-              </div>
-              {deliveryLocations.length === 0 && <p className="text-sm text-muted-foreground mt-2">Add items to your cart to plan a delivery route.</p>}
-              {tspResult && (
-                <div className="text-sm mt-4">
-                  <p><strong>Total Distance:</strong> {tspResult.distance.toFixed(2)} km</p>
-                  <p><strong>Route:</strong> <span className="font-code">{tspResult.path.join(' -> ')}</span></p>
-                </div>
-              )}
-            </TabsContent>
             <TabsContent value="max-flow" className="mt-0">
               <CardTitle>Maximum Delivery Capacity</CardTitle>
-              <CardDescription className="mt-1 mb-4">Determine the maximum number of packages we can move from a source to a sink location using the Max-Flow algorithm.</CardDescription>
+              <CardDescription className="mt-1 mb-4">Determine the maximum number of packages (throughput) that can be moved between any two points in the network, using the Edmonds-Karp algorithm.</CardDescription>
               <div className="flex gap-2 mb-4 items-center">
                  <Select value={startNode} onValueChange={setStartNode}>
                   <SelectTrigger className="w-[180px]">
@@ -304,7 +368,7 @@ export default function AlgorithmVisualizer() {
               </div>
                {maxFlowResult !== null && (
                 <div className="text-sm">
-                  <p><strong>Max Packages:</strong> {maxFlowResult} units</p>
+                  <p><strong>Max Package Flow:</strong> {maxFlowResult} units</p>
                 </div>
               )}
             </TabsContent>

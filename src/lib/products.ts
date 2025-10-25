@@ -20,7 +20,7 @@ const productImages = PlaceHolderImages.reduce((acc, img) => {
 
 const deliveryLocations = Array.from({ length: 20 }, (_, i) => `loc${i + 1}`);
 
-const warehouses = ['warehouse-a', 'warehouse-b', 'warehouse-c'];
+const warehouses = ['warehouse-a', 'warehouse-b', 'warehouse-c', 'warehouse-d', 'warehouse-e'];
 
 export const products: Product[] = [
   {
@@ -57,7 +57,7 @@ export const products: Product[] = [
     price: 199.99,
     image: productImages['product-4'],
     deliveryLocationId: deliveryLocations[3],
-    warehouseId: warehouses[0], // Warehouse A
+    warehouseId: warehouses[3], // Warehouse D
   },
   {
     id: 'prod_5',
@@ -66,7 +66,7 @@ export const products: Product[] = [
     price: 149.99,
     image: productImages['product-5'],
     deliveryLocationId: deliveryLocations[4],
-    warehouseId: warehouses[1], // Warehouse B
+    warehouseId: warehouses[4], // Warehouse E
   },
   {
     id: 'prod_6',
@@ -75,7 +75,7 @@ export const products: Product[] = [
     price: 349.99,
     image: productImages['product-6'],
     deliveryLocationId: deliveryLocations[5],
-    warehouseId: warehouses[2], // Warehouse C
+    warehouseId: warehouses[0], // Warehouse A
   },
   {
     id: 'prod_7',
@@ -84,7 +84,7 @@ export const products: Product[] = [
     price: 1499.99,
     image: productImages['product-7'],
     deliveryLocationId: deliveryLocations[6],
-    warehouseId: warehouses[0], // Warehouse A
+    warehouseId: warehouses[1], // Warehouse B
   },
   {
     id: 'prod_8',
@@ -93,6 +93,6 @@ export const products: Product[] = [
     price: 79.99,
     image: productImages['product-8'],
     deliveryLocationId: deliveryLocations[7],
-    warehouseId: warehouses[1], // Warehouse B
+    warehouseId: warehouses[2], // Warehouse C
   },
 ];
