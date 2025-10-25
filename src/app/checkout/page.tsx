@@ -16,7 +16,7 @@ import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split } from 'lucide-react';
+import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split, User } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import type { Product } from '@/lib/products';
 import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
@@ -33,11 +33,17 @@ type SplitShipment = {
     items: Product[];
 }
 
+type OrderShipments = {
+  orderId: string;
+  address: string;
+  shipments: SplitShipment[];
+}
+
 type CombinedResult = {
   tspResult: TspResult;
-  // This is the "split shipment" model for the main user's order
-  splitShipments: SplitShipment[];
-  maxFlowToFirstCustomer: MaxFlowResult; // This remains a theoretical analysis
+  // This is the "split shipment" model for ALL orders
+  allOrderShipments: OrderShipments[];
+  maxFlowToFirstCustomer: MaxFlowResult; // This remains a theoretical analysis for the main user
   // These are for the combined TSP route
   requiredWarehouses: string[];
   deliveryAddresses: string[];
@@ -69,23 +75,29 @@ export default function CheckoutPage() {
       return;
     }
 
-    // --- Start of Amazon-style "Split Shipment" Logic for the main user ---
-    const userItemsByWarehouse: Record<string, Product[]> = {};
-    mainUserOrder.items.forEach(item => {
-        if (!userItemsByWarehouse[item.warehouseId]) {
-            userItemsByWarehouse[item.warehouseId] = [];
-        }
-        userItemsByWarehouse[item.warehouseId].push(item);
-    });
+    // --- Start of Amazon-style "Split Shipment" Logic for ALL orders ---
+    const allOrderShipments: OrderShipments[] = allSimulatedOrders
+      .filter(order => order.items.length > 0)
+      .map(order => {
+        const itemsByWarehouse: Record<string, Product[]> = {};
+        order.items.forEach(item => {
+            if (!itemsByWarehouse[item.warehouseId]) {
+                itemsByWarehouse[item.warehouseId] = [];
+            }
+            itemsByWarehouse[item.warehouseId].push(item);
+        });
 
-    const splitShipments: SplitShipment[] = Object.entries(userItemsByWarehouse).map(([warehouseId, items]) => {
-        const path = dijkstra(allNodes, allEdges, warehouseId, mainUserOrder.address);
-        return {
-            warehouseId,
-            warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
-            path,
-            items,
-        };
+        const shipments: SplitShipment[] = Object.entries(itemsByWarehouse).map(([warehouseId, items]) => {
+            const path = dijkstra(allNodes, allEdges, warehouseId, order.address);
+            return {
+                warehouseId,
+                warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
+                path,
+                items,
+            };
+        });
+        
+        return { orderId: order.id, address: order.address, shipments };
     });
     // --- End of "Split Shipment" Logic ---
 
@@ -115,8 +127,7 @@ export default function CheckoutPage() {
     // --- End of Consolidated Logic ---
 
 
-    // --- Start of Standalone Analysis (Max-Flow) ---
-    // Find the closest warehouse to the main user to run the max-flow analysis from.
+    // --- Start of Standalone Analysis (Max-Flow for the main user only) ---
     let nearestWarehouseForMaxFlow = '';
     let minDistance = Infinity;
     const userWarehouses = new Set(mainUserOrder.items.map(item => item.warehouseId));
@@ -135,7 +146,7 @@ export default function CheckoutPage() {
 
     setCombinedResult({
       tspResult,
-      splitShipments,
+      allOrderShipments,
       maxFlowToFirstCustomer,
       requiredWarehouses: Array.from(allRequiredWarehouses),
       deliveryAddresses: Array.from(allDeliveryAddresses),
@@ -206,27 +217,32 @@ export default function CheckoutPage() {
                     <CardContent className="space-y-6 text-sm">
 
                         <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200">
-                             <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Separate Shipments for Your Order (Fastest Delivery)</h4>
-                            <p className="text-xs text-muted-foreground mb-3">Like Amazon, your order is split into multiple shipments to get each item to you as fast as possible. Each part ships directly from its warehouse to your address.</p>
-                             {combinedResult.splitShipments.length > 0 ? (
-                                combinedResult.splitShipments.map((shipment, index) => (
-                                     <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
-                                        <p className="font-medium text-primary">Shipment {index + 1} from {shipment.warehouseName}</p>
-                                        <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                            {shipment.items.map((item, itemIndex) => (
-                                                <li key={itemIndex}>{item.name}</li>
-                                            ))}
-                                        </ul>
-                                        {shipment.path ? (
-                                            <>
-                                                <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
-                                                <p><strong>Direct Path:</strong> <span className="font-code text-xs">{shipment.path.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
-                                            </>
-                                        ) : <p className="text-destructive-foreground">No path found.</p>}
+                             <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Separate Shipments for Each Order (Fastest Delivery)</h4>
+                            <p className="text-xs text-muted-foreground mb-3">Like Amazon, each customer's order is split into multiple shipments to get items to them as fast as possible. Each part ships directly from its warehouse to the customer's address.</p>
+                             {combinedResult.allOrderShipments.length > 0 ? (
+                                combinedResult.allOrderShipments.map((order, orderIndex) => (
+                                     <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
+                                        <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.orderId}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
+                                        {order.shipments.map((shipment, index) => (
+                                            <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
+                                                <p className="font-medium text-primary">Shipment {index + 1} from {shipment.warehouseName}</p>
+                                                <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                    {shipment.items.map((item, itemIndex) => (
+                                                        <li key={itemIndex}>{item.name}</li>
+                                                    ))}
+                                                </ul>
+                                                {shipment.path ? (
+                                                    <>
+                                                        <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
+                                                        <p><strong>Direct Path:</strong> <span className="font-code text-xs">{shipment.path.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                                    </>
+                                                ) : <p className="text-destructive-foreground">No path found.</p>}
+                                            </div>
+                                        ))}
                                     </div>
                                 ))
                             ) : (
-                                <p className="text-xs text-muted-foreground pl-4">Your cart is empty.</p>
+                                <p className="text-xs text-muted-foreground pl-4">No orders with items to ship.</p>
                             )}
                         </div>
                         
@@ -266,7 +282,7 @@ export default function CheckoutPage() {
 
                          <div className="p-4 bg-muted/50 rounded-lg">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
-                            <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your order.</p>
+                            <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your main order.</p>
                             <div >
                                 <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
                                 {combinedResult.maxFlowToFirstCustomer !== null ? (
@@ -286,3 +302,4 @@ export default function CheckoutPage() {
   );
 }
 
+    

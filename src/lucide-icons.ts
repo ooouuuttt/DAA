@@ -16,6 +16,10 @@ export {
     Trash2,
     UserPlus,
     Info,
-    Split
+    Split,
+    User
 } from 'lucide-react';
 
+
+
+    
