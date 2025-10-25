@@ -354,7 +354,7 @@ export default function AlgorithmVisualizer() {
                 <Select value={endNode} onValueChange={setEndNode}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Select destination" />
-                  </Trigger>
+                  </SelectTrigger>
                   <SelectContent>
                     {allNodes.map(n => (
                       <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
