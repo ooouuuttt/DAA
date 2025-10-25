@@ -224,6 +224,25 @@ export default function CheckoutPage() {
 
   }, [combinedResult, activeMap]);
 
+  const renderPath = (path: string[], customerLocations: string[] = []) => {
+    return (
+      <span className="font-code text-xs">
+        {path.map((id, index) => {
+            const name = nodeMap.get(id)?.name || id;
+            const isCustomer = customerLocations.includes(id);
+            const isWaypoint = !nodeMap.get(id)?.id.includes('loc');
+
+            if (isCustomer) {
+                return <span key={index} className="text-green-600 font-bold">{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
+            }
+             if (isWaypoint) {
+                return <span key={index}>{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
+            }
+            return <span key={index} className="text-muted-foreground">{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
+        })}
+      </span>
+    );
+  };
 
   return (
     <div className="space-y-8">
@@ -289,7 +308,7 @@ export default function CheckoutPage() {
                                                     {shipment.path ? (
                                                         <>
                                                             <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
-                                                            <p><strong>Direct Path:</strong> <span className="font-code text-xs">{shipment.path.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                                            <p><strong>Direct Path:</strong> {renderPath(shipment.path.path, [order.address])}</p>
                                                         </>
                                                     ) : <p className="text-destructive-foreground">No path found.</p>}
                                                 </div>
@@ -337,7 +356,7 @@ export default function CheckoutPage() {
                                 {combinedResult.consolidatedTspResult ? (
                                     <div className="space-y-2">
                                         <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.distance.toFixed(2)} km</p>
-                                        <p><strong>Optimized Route for One Truck:</strong> <span className="font-code">{combinedResult.consolidatedTspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                        <p><strong>Optimized Route for One Truck:</strong> {renderPath(combinedResult.consolidatedTspResult.path, combinedResult.deliveryAddressesForTsp)}</p>
                                     </div>
                                 ) : <p>Not enough stops for a TSP route.</p>}
                             </div>
@@ -368,7 +387,7 @@ export default function CheckoutPage() {
                                             {batch.route ? (
                                                 <div className="pt-2">
                                                     <p><strong>Mini-Route Distance:</strong> {batch.route.distance.toFixed(2)} km</p>
-                                                    <p><strong>Mini-Route Path:</strong> <span className="font-code text-xs">{batch.route.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                                    <p><strong>Mini-Route Path:</strong> {renderPath(batch.route.path, batch.customers)}</p>
                                                 </div>
                                             ) : <p className="text-destructive-foreground">Not enough stops for a route.</p>}
                                         </div>

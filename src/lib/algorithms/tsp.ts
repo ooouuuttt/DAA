@@ -30,15 +30,24 @@ function findShortestPath(fromNodeId: string, toNodeId: string, nodes: Node[], a
       }
     });
   }
+  
+  const path: string[] = [];
+  let current: string | null = toNodeId;
+  while(current) {
+      path.unshift(current);
+      current = prev[current];
+  }
 
-  return distances[toNodeId];
+  if (path[0] === fromNodeId) {
+      return { distance: distances[toNodeId], path };
+  }
+  return { distance: Infinity, path: [] };
 }
 
 
 // Heuristic solver for a TSP-like problem with separate pickup and delivery phases.
 export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, warehousesToVisit: string[], deliveryAddresses: string[]) {
   if (warehousesToVisit.length === 0 && deliveryAddresses.length === 0) {
-    // If there are no stops, the truck just stays at the depot.
      if (deliveryAddresses.length > 0 || warehousesToVisit.length > 0) {
       return { path: [startDepot, startDepot], distance: 0 };
     }
@@ -54,20 +63,20 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
 
   // Create a complete distance matrix for all relevant nodes (depot, warehouses, customers)
   const relevantNodes = [...new Set([startDepot, ...warehousesToVisit, ...deliveryAddresses])];
-  const distMatrix: { [key: string]: { [key: string]: number } } = {};
+  const distMatrix: { [key: string]: { [key: string]: { distance: number; path: string[] } } } = {};
 
   for (const fromNode of relevantNodes) {
     distMatrix[fromNode] = {};
     for (const toNode of relevantNodes) {
         if (fromNode === toNode) {
-            distMatrix[fromNode][toNode] = 0;
+            distMatrix[fromNode][toNode] = { distance: 0, path: [fromNode] };
         } else {
             distMatrix[fromNode][toNode] = findShortestPath(fromNode, toNode, nodes, adj);
         }
     }
   }
   
-  const finalPath = [startDepot];
+  const finalPath: string[] = [];
   let totalDistance = 0;
   let currentLoc = startDepot;
 
@@ -76,22 +85,24 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
   while (unvisitedWarehouses.size > 0) {
     let nearest: string | null = null;
     let minDistance = Infinity;
+    let segmentPath: string[] = [];
 
     unvisitedWarehouses.forEach(wh => {
-      const distance = distMatrix[currentLoc][wh];
-      if (distance < minDistance) {
-        minDistance = distance;
+      const leg = distMatrix[currentLoc][wh];
+      if (leg.distance < minDistance) {
+        minDistance = leg.distance;
         nearest = wh;
+        segmentPath = leg.path;
       }
     });
     
     if (nearest) {
       totalDistance += minDistance;
+      finalPath.push(...segmentPath.slice(1));
       currentLoc = nearest;
-      finalPath.push(currentLoc);
       unvisitedWarehouses.delete(currentLoc);
     } else {
-      break; // Should not happen if there are unvisited warehouses
+      break; 
     }
   }
 
@@ -100,31 +111,33 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
   while (unvisitedCustomers.size > 0) {
     let nearest: string | null = null;
     let minDistance = Infinity;
+    let segmentPath: string[] = [];
 
     unvisitedCustomers.forEach(cust => {
-      const distance = distMatrix[currentLoc][cust];
-      if (distance < minDistance) {
-        minDistance = distance;
+      const leg = distMatrix[currentLoc][cust];
+      if (leg.distance < minDistance) {
+        minDistance = leg.distance;
         nearest = cust;
+        segmentPath = leg.path;
       }
     });
     
     if (nearest) {
       totalDistance += minDistance;
+      finalPath.push(...segmentPath.slice(1));
       currentLoc = nearest;
-      finalPath.push(currentLoc);
       unvisitedCustomers.delete(currentLoc);
     } else {
-      break; // Should not happen if there are unvisited customers
+      break; 
     }
   }
   
   // Phase 3: Return to depot
-  const returnDistance = distMatrix[currentLoc] ? distMatrix[currentLoc][startDepot] : 0;
-  if (returnDistance !== undefined) {
-    totalDistance += returnDistance;
-    finalPath.push(startDepot);
+  const returnLeg = distMatrix[currentLoc] ? distMatrix[currentLoc][startDepot] : undefined;
+  if (returnLeg && returnLeg.distance !== Infinity) {
+    totalDistance += returnLeg.distance;
+    finalPath.push(...returnLeg.path.slice(1));
   }
-
-  return { path: finalPath, distance: totalDistance };
+  
+  return { path: [startDepot, ...finalPath], distance: totalDistance };
 }
