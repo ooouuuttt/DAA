@@ -15,4 +15,7 @@ export {
     Warehouse,
     Trash2,
     UserPlus,
+    Info,
+    Split
 } from 'lucide-react';
+
