@@ -1,3 +1,52 @@
 {
-  "placeholderImages": []
+  "placeholderImages": [
+    {
+      "id": "product-1",
+      "description": "A modern smartphone with a sleek design.",
+      "imageUrl": "https://images.unsplash.com/photo-1732998369893-af4c9a4695fe?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxzbWFydHBob25lJTIwZGV2aWNlfGVufDB8fHx8MTc2MTI2OTY0Nnww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "smartphone device"
+    },
+    {
+      "id": "product-2",
+      "description": "Wireless headphones with noise-cancelling features.",
+      "imageUrl": "https://images.unsplash.com/photo-1700998059702-089b86471898?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw1fHxoZWFkcGhvbmVzJTIwYXVkaW98ZW58MHx8fHwxNzYxMzc2MDQzfDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "headphones audio"
+    },
+    {
+      "id": "product-3",
+      "description": "A stylish and durable backpack for daily use.",
+      "imageUrl": "https://images.unsplash.com/photo-1554200242-a05335f45ef0?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw1fHxiYWNrcGFjayUyMHRyYXZlbHxlbnwwfHx8fDE3NjEzMjAwNzd8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "backpack travel"
+    },
+    {
+      "id": "product-4",
+      "description": "A smart watch with fitness tracking capabilities.",
+      "imageUrl": "https://images.unsplash.com/photo-1664219624278-5c0309a0eeb8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw1fHxzbWFydHdhdGNoJTIwdGVjaHxlbnwwfHx8fDE3NjEzODQ4OTZ8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "smartwatch tech"
+    },
+    {
+      "id": "product-5",
+      "description": "A professional-grade coffee maker.",
+      "imageUrl": "https://images.unsplash.com/photo-1638129284529-bed6d6f588e7?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxMHx8Y29mZmVlJTIwbWFrZXJ8ZW58MHx8fHwxNzYxMzU0MjgxfDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "coffee maker"
+    },
+    {
+      "id": "product-6",
+      "description": "An ergonomic office chair for comfort.",
+      "imageUrl": "https://images.unsplash.com/photo-1612372606404-0ab33e7187ee?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw1fHxvZmZpY2UlMjBjaGFpcnxlbnwwfHx8fDE3NjEyODAzNDJ8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "office chair"
+    },
+    {
+      "id": "product-7",
+      "description": "A high-performance gaming laptop.",
+      "imageUrl": "https://images.unsplash.com/photo-1611078489935-0cb964de46d6?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw1fHxnYW1pbmclMjBsYXB0b3B8ZW58MHx8fHwxNzYxMzMyMDQyfDA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "gaming laptop"
+    },
+    {
+      "id": "product-8",
+      "description": "A portable bluetooth speaker.",
+      "imageUrl": "https://images.unsplash.com/photo-1598034989845-48532781987e?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw5fHxibHVldG9vdGglMjBzcGVha2VyfGVufDB8fHx8MTc2MTMxMzg0MXww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "bluetooth speaker"
+    }
+  ]
 }
