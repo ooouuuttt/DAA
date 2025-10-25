@@ -1,3 +1,4 @@
+
 export {
     Route,
     Truck,
@@ -17,7 +18,8 @@ export {
     UserPlus,
     Info,
     Split,
-    User
+    User,
+    Eye
 } from 'lucide-react';
 
 
