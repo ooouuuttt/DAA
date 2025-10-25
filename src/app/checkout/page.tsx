@@ -15,7 +15,7 @@ import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, Warehouse, Info } from 'lucide-react';
+import { Route, Truck, Zap, Combine, Warehouse, Info, Package } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import type { Product } from '@/lib/products';
 import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
@@ -30,6 +30,7 @@ type CombinedResult = {
   maxFlowToFirstCustomer: MaxFlowResult;
   requiredWarehouses: string[];
   deliveryAddresses: string[];
+  warehouseManifest: Record<string, {productName: string, orderId: string}[]>;
 };
 
 export default function CheckoutPage() {
@@ -58,9 +59,19 @@ export default function CheckoutPage() {
     }
 
     const allRequiredWarehouses = new Set<string>();
+    const warehouseManifest: CombinedResult['warehouseManifest'] = {};
+
     allSimulatedOrders.forEach(order => {
+      if(order.items.length === 0) return;
       order.items.forEach(item => {
         allRequiredWarehouses.add(item.warehouseId);
+        if (!warehouseManifest[item.warehouseId]) {
+            warehouseManifest[item.warehouseId] = [];
+        }
+        warehouseManifest[item.warehouseId].push({
+            productName: item.name,
+            orderId: order.id
+        });
       });
     });
 
@@ -95,6 +106,7 @@ export default function CheckoutPage() {
       maxFlowToFirstCustomer,
       requiredWarehouses: Array.from(allRequiredWarehouses),
       deliveryAddresses: Array.from(allDeliveryAddresses),
+      warehouseManifest
     });
   };
 
@@ -108,12 +120,10 @@ export default function CheckoutPage() {
 
   const mapHighlights = useMemo(() => {
     if (combinedResult) {
-      const nodes = new Set([
-        ...combinedResult.requiredWarehouses,
-        ...combinedResult.deliveryAddresses,
-        'warehouse-a'
-      ]);
-      return Array.from(nodes);
+        const depot = { id: 'warehouse-a', type: 'depot' };
+        const warehouses = combinedResult.requiredWarehouses.map(id => ({ id, type: 'warehouse' }));
+        const customers = combinedResult.deliveryAddresses.map(id => ({ id, type: 'customer' }));
+        return [depot, ...warehouses, ...customers];
     }
     return [];
   }, [combinedResult]);
@@ -149,7 +159,7 @@ export default function CheckoutPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Simulation Map</CardTitle>
-                    <CardDescription>Visual representation of warehouses (blue), delivery locations (yellow), and the optimized route.</CardDescription>
+                    <CardDescription>Visual representation of the depot (purple), warehouses (blue), delivery locations (yellow), and the optimized truck route.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <DummyMap nodes={allNodes} edges={allEdges} highlightedPath={mapPath} highlightedNodes={mapHighlights} />
@@ -164,15 +174,35 @@ export default function CheckoutPage() {
                         
                         <div className="p-4 bg-muted/50 rounded-lg">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Batched Delivery Route (TSP)</h4>
-                            <p className="text-xs text-muted-foreground mb-2">A single truck serves all orders. It starts at the central depot (Depot A), visits the necessary warehouses to collect all items, delivers to all customers, then returns to the depot.</p>
+                            <p className="text-xs text-muted-foreground mb-3">A single truck serves all orders. It starts at the central depot ({nodeMap.get('warehouse-a')?.name}), visits the necessary warehouses to collect all items, delivers to all customers, then returns to the depot.</p>
                             
-                            <p className="mb-2"><strong className="flex items-center gap-2"><Warehouse size={16}/> Warehouses to Visit:</strong> The truck must visit <span className="font-code">{combinedResult.requiredWarehouses.map(id => nodeMap.get(id)?.name).join(', ') || 'None'}</span> because they contain items for this batch of orders.</p>
+                            <div className="space-y-3">
+                                <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Warehouse Pickups:</h5>
+                                {combinedResult.requiredWarehouses.length > 0 ? (
+                                    Object.entries(combinedResult.warehouseManifest).map(([whId, items]) => (
+                                        <div key={whId} className="pl-4 border-l-2 ml-2">
+                                            <p className="font-medium text-primary">{nodeMap.get(whId)?.name}</p>
+                                            <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                {items.map((item, index) => (
+                                                    <li key={index}>
+                                                        <span className="font-semibold">{item.productName}</span> for order <span className="font-semibold text-primary/80">{item.orderId}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <p className="text-xs text-muted-foreground pl-4">No warehouses to visit for this batch.</p>
+                                )}
+                            </div>
                             
+                            <Separator className="my-4"/>
+
                             {combinedResult.tspResult ? (
-                                <>
+                                <div className="space-y-2">
                                     <p><strong>Total Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
                                     <p><strong>Optimized Route:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
-                                </>
+                                </div>
                             ) : <p>Not enough stops for a TSP route.</p>}
                         </div>
 
@@ -212,3 +242,5 @@ export default function CheckoutPage() {
     </div>
   );
 }
+
+    

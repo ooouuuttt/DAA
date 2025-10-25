@@ -2,11 +2,16 @@
 
 import type { Node, Edge } from '@/lib/graph';
 
+type HighlightedNode = {
+  id: string;
+  type: 'depot' | 'warehouse' | 'customer';
+}
+
 interface DummyMapProps {
   nodes: Node[];
   edges: Edge[];
   highlightedPath?: string[];
-  highlightedNodes?: string[];
+  highlightedNodes?: HighlightedNode[];
 }
 
 export default function DummyMap({ nodes, edges, highlightedPath = [], highlightedNodes = [] }: DummyMapProps) {
@@ -19,6 +24,8 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
       pathEdges.add(`${v}-${u}`);
     }
   }
+
+  const highlightedNodeMap = new Map(highlightedNodes.map(n => [n.id, n.type]));
 
   return (
     <div className="w-full aspect-video bg-card rounded-lg p-4 border relative">
@@ -33,7 +40,7 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
             markerHeight="4"
             orient="auto-start-reverse"
           >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(var(--accent))" />
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="hsl(var(--primary))" />
           </marker>
         </defs>
 
@@ -64,7 +71,7 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
               y1={nodes.find((n) => n.id === edge.source)!.y}
               x2={nodes.find((n) => n.id === edge.target)!.x}
               y2={nodes.find((n) => n.id === edge.target)!.y}
-              className="stroke-accent"
+              className="stroke-primary"
               strokeWidth="2.5"
               markerEnd="url(#arrow)"
             />
@@ -72,25 +79,43 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
 
         {/* All Nodes */}
         {nodes.map((node) => {
-          const isWarehouse = node.id.includes('warehouse');
+          const isWarehouseNode = node.id.includes('warehouse');
+          const highlightType = highlightedNodeMap.get(node.id);
           const onPath = highlightedPath.includes(node.id);
-          const isHighlighted = highlightedNodes.includes(node.id);
+
+          let fillClass = 'fill-card';
+          let strokeClass = 'stroke-muted-foreground';
+          let radius = 6;
+
+          if (highlightType === 'depot') {
+            fillClass = 'fill-purple-500';
+            strokeClass = 'stroke-purple-700';
+            radius = 9;
+          } else if (highlightType === 'warehouse') {
+            fillClass = 'fill-blue-500';
+            strokeClass = 'stroke-blue-700';
+            radius = 8;
+          } else if (highlightType === 'customer') {
+            fillClass = 'fill-amber-400';
+            strokeClass = 'stroke-amber-600';
+            radius = 7;
+          }
           
           return (
             <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
               <circle
-                r={isWarehouse ? 8 : 6}
-                className={`${isWarehouse ? 'fill-primary' : (isHighlighted ? 'fill-accent' : 'fill-card')} ${isHighlighted ? 'stroke-primary' : 'stroke-muted-foreground'}`}
-                strokeWidth={onPath || isHighlighted ? 2 : 1}
+                r={radius}
+                className={`${fillClass} ${strokeClass}`}
+                strokeWidth={onPath ? 2.5 : 1.5}
               />
               <text
-                dy={isWarehouse ? -12 : -10}
+                dy={isWarehouseNode ? -14 : -12}
                 textAnchor="middle"
                 className="text-[8px] font-sans fill-foreground font-semibold"
               >
                 {node.name}
               </text>
-              {!isWarehouse && (
+              {!isWarehouseNode && (
                  <text
                     dy={16}
                     textAnchor="middle"
@@ -106,3 +131,5 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
     </div>
   );
 }
+
+    
