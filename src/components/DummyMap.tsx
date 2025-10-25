@@ -16,12 +16,17 @@ interface DummyMapProps {
 
 export default function DummyMap({ nodes, edges, highlightedPath = [], highlightedNodes = [] }: DummyMapProps) {
   const pathEdges = new Set<string>();
+  const directionalPathEdges = new Set<string>();
+
   if (highlightedPath.length > 1) {
     for (let i = 0; i < highlightedPath.length - 1; i++) {
       const u = highlightedPath[i];
       const v = highlightedPath[i + 1];
+      // For bi-directional matching to find the edge
       pathEdges.add(`${u}-${v}`);
       pathEdges.add(`${v}-${u}`);
+      // For directional arrow
+      directionalPathEdges.add(`${u}-${v}`);
     }
   }
 
@@ -64,18 +69,23 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
               pathEdges.has(`${edge.source}-${edge.target}`) ||
               pathEdges.has(`${edge.target}-${edge.source}`)
           )
-          .map((edge) => (
-            <line
-              key={`highlight-${edge.source}-${edge.target}`}
-              x1={nodes.find((n) => n.id === edge.source)!.x}
-              y1={nodes.find((n) => n.id === edge.source)!.y}
-              x2={nodes.find((n) => n.id === edge.target)!.x}
-              y2={nodes.find((n) => n.id === edge.target)!.y}
-              className="stroke-primary"
-              strokeWidth="2.5"
-              markerEnd="url(#arrow)"
-            />
-          ))}
+          .map((edge) => {
+            const isDirectional = directionalPathEdges.has(`${edge.source}-${edge.target}`);
+            const isReversed = directionalPathEdges.has(`${edge.target}-${edge.source}`);
+            return (
+                <line
+                key={`highlight-${edge.source}-${edge.target}`}
+                x1={nodes.find((n) => n.id === edge.source)!.x}
+                y1={nodes.find((n) => n.id === edge.source)!.y}
+                x2={nodes.find((n) => n.id === edge.target)!.x}
+                y2={nodes.find((n) => n.id === edge.target)!.y}
+                className="stroke-primary"
+                strokeWidth="2.5"
+                markerEnd={isDirectional ? "url(#arrow)" : undefined}
+                markerStart={isReversed ? "url(#arrow)" : undefined}
+                />
+            )
+          })}
 
         {/* All Nodes */}
         {nodes.map((node) => {
@@ -107,6 +117,7 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
                 r={radius}
                 className={`${fillClass} ${strokeClass}`}
                 strokeWidth={onPath ? 2.5 : 1.5}
+                stroke={onPath ? 'hsl(var(--primary))' : undefined}
               />
               <text
                 dy={isWarehouseNode ? -14 : -12}
@@ -131,5 +142,3 @@ export default function DummyMap({ nodes, edges, highlightedPath = [], highlight
     </div>
   );
 }
-
-    
