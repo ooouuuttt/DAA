@@ -17,16 +17,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { nodes as allNodes, edges as allEdges } from '@/lib/graph';
+import { nodes as allNodes, edges as allEdges, nodeMap } from '@/lib/graph';
 import DummyMap from './DummyMap';
 import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, MapPin, Package, Users } from 'lucide-react';
+import { Route, Truck, Zap, Combine, MapPin, Users, Warehouse } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
+import { products } from '@/lib/products';
 
 type DijkstraResult = { path: string[]; distance: number } | null;
 type TspResult = { path: string[]; distance: number } | null;
@@ -40,8 +41,8 @@ type CombinedResult = {
 };
 
 const otherDeliveries = [
-  { id: 'user2', address: 'loc15', items: ['prod_2'] },
-  { id: 'user3', address: 'loc4', items: ['prod_6'] },
+  { id: 'user2', address: 'loc15', items: [products[1], products[4]] }, // Headphones (C), Coffee Maker (A)
+  { id: 'user3', address: 'loc4', items: [products[5]] }, // Chair (B)
 ];
 
 
@@ -97,7 +98,7 @@ export default function AlgorithmVisualizer() {
     const currentUserOrder = {
         id: 'main-user',
         address: deliveryAddress,
-        items: cartItems.map(i => i.id)
+        items: cartItems
     };
 
     let allOrders = [currentUserOrder];
@@ -111,21 +112,13 @@ export default function AlgorithmVisualizer() {
     }
 
     const allRequiredWarehouses = new Set<string>();
-    cartItems.forEach(item => allRequiredWarehouses.add(item.warehouseId));
-    if(includeOtherDeliveries) {
-      // This is a simplified lookup. In a real app, you'd fetch product details.
-      const allProducts = require('@/lib/products').products;
-      otherDeliveries.forEach(order => {
-        order.items.forEach(itemId => {
-          const product = allProducts.find((p: any) => p.id === itemId);
-          if (product) {
-            allRequiredWarehouses.add(product.warehouseId);
-          }
+    allOrders.forEach(order => {
+        order.items.forEach(item => {
+            allRequiredWarehouses.add(item.warehouseId);
         });
-      });
-    }
+    });
 
-    const allDeliveryAddresses = new Set<string>(allOrders.map(o => o.address));
+    const allDeliveryAddresses = new Set<string>(allOrders.filter(o => o.items.length > 0).map(o => o.address));
     
     // 1. TSP from a central depot to all required warehouses then to all customers.
     const tspStops = [...allRequiredWarehouses, ...allDeliveryAddresses];
@@ -154,7 +147,7 @@ export default function AlgorithmVisualizer() {
     setCombinedResult({ tspResult, shortestPath, maxFlow, requiredWarehouses: Array.from(allRequiredWarehouses), allStops: tspStops });
     setDijkstraResult(null);
     setTspResult(null);
-  }
+  };
 
   const mapPath = useMemo(() => {
     if (activeTab === 'dijkstra' && dijkstraResult) return dijkstraResult.path;
@@ -199,15 +192,30 @@ export default function AlgorithmVisualizer() {
             </TabsList>
           </div>
           <div className="md:col-span-2 p-6">
-            <TabsContent value="combined" className="mt-0 space-y-4">
-              <CardTitle>Full Logistics Simulation (like Amazon)</CardTitle>
-              <CardDescription className="mt-1 mb-4">
-                This simulates a full delivery batch. A truck starts at a central depot, visits all necessary warehouses to collect items for multiple customers, delivers all packages, and returns.
-              </CardDescription>
-               <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
+            <TabsContent value="combined" className="mt-0 space-y-6">
+              <div>
+                <CardTitle>Full Logistics Simulation (like Amazon)</CardTitle>
+                <CardDescription className="mt-1">
+                  This simulates a full delivery batch. A truck starts at a central depot, visits all necessary warehouses to collect items for multiple customers, delivers all packages, and returns.
+                </CardDescription>
+              </div>
+
+               <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+                  <h4 className="font-bold">How to Use This Demo:</h4>
+                  <ol className="list-decimal list-inside text-sm space-y-1">
+                    <li>Go to the <a href="/" className="text-primary underline">Products page</a> and add items to your cart. Notice they ship from different warehouses.</li>
+                    <li>Come back here. Select your delivery address from the dropdown.</li>
+                    <li>Use the checkbox to include or exclude other simulated customer orders in the batch.</li>
+                    <li>Click the "Optimize Full Delivery Batch" button to see the magic happen!</li>
+                  </ol>
+               </div>
+
+              <Separator />
+
+              <div>
+                <Label htmlFor="delivery-address" className="font-medium">1. Your Delivery Details</Label>
+                <div id="delivery-address" className="flex items-center gap-2 mt-2">
                     <MapPin className="w-5 h-5 text-muted-foreground" />
-                    <span className="font-medium">Your Address:</span>
                     <Select value={deliveryAddress} onValueChange={setDeliveryAddress}>
                     <SelectTrigger className="w-[180px]">
                         <SelectValue placeholder="Select address" />
@@ -219,28 +227,51 @@ export default function AlgorithmVisualizer() {
                     </SelectContent>
                     </Select>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Checkbox id="include-others" checked={includeOtherDeliveries} onCheckedChange={(checked) => setIncludeOtherDeliveries(Boolean(checked))} />
-                  <Label htmlFor="include-others" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                    Include other users' deliveries
-                  </Label>
-                </div>
+                <div className="mt-2 text-sm text-muted-foreground">You have {cartItems.length} item(s) in your cart.</div>
               </div>
-              <Button onClick={runCombined} disabled={cartItems.length === 0 && !includeOtherDeliveries}>Optimize Full Delivery Batch</Button>
-               {(cartItems.length === 0 && !includeOtherDeliveries) && <p className="text-sm text-muted-foreground mt-2">Add items to your cart or include other deliveries to run a simulation.</p>}
+
+
+              <div>
+                  <Label className="font-medium">2. Simulate Other Customers</Label>
+                  <div className="flex items-center space-x-2 mt-2">
+                    <Checkbox id="include-others" checked={includeOtherDeliveries} onCheckedChange={(checked) => setIncludeOtherDeliveries(Boolean(checked))} />
+                    <Label htmlFor="include-others" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                      Include other users' deliveries in the same batch
+                    </Label>
+                  </div>
+                  {includeOtherDeliveries && (
+                    <div className="mt-4 space-y-2 text-sm p-3 bg-muted/50 rounded-lg">
+                       <h5 className="font-semibold flex items-center gap-2"><Users size={16}/> Today's Other Deliveries:</h5>
+                       {otherDeliveries.map(order => (
+                         <div key={order.id}>
+                           - <strong>{order.id}</strong> is ordering {order.items.length} item(s) to <strong>{nodeMap.get(order.address)?.name}</strong>.
+                         </div>
+                       ))}
+                    </div>
+                  )}
+              </div>
+
+               <div>
+                <Label className="font-medium">3. Run Simulation</Label>
+                 <div className="mt-2">
+                    <Button onClick={runCombined} disabled={cartItems.length === 0 && !includeOtherDeliveries}>Optimize Full Delivery Batch</Button>
+                    {(cartItems.length === 0 && !includeOtherDeliveries) && <p className="text-sm text-muted-foreground mt-2">Add items to your cart or include other deliveries to run a simulation.</p>}
+                 </div>
+               </div>
                
                {combinedResult && (
-                <div className="space-y-4 text-sm">
-                    <p><strong>Warehouses to Visit:</strong> <span className="font-code">{combinedResult.requiredWarehouses.join(', ') || 'None'}</span></p>
+                <div className="space-y-4 text-sm pt-4 border-t">
+                    <h4 className="font-bold">Optimization Results:</h4>
+                    <p><strong className="flex items-center gap-2"><Warehouse size={16}/> Warehouses to Visit:</strong> The truck must visit <span className="font-code">{combinedResult.requiredWarehouses.map(id => nodeMap.get(id)?.name).join(', ') || 'None'}</span> to pick up all items for this batch.</p>
                     <Separator />
                     
                     <div className="p-4 bg-muted/50 rounded-lg">
                         <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Batched Delivery Route (TSP)</h4>
                         {combinedResult.tspResult ? (
                             <>
-                                <p>A single truck serves all orders. It starts at warehouse-a, visits required warehouses, delivers to all customers, then returns.</p>
+                                <p>A single truck serves all orders. It starts at Depot A, visits required warehouses, delivers to all customers, then returns.</p>
                                 <p><strong>Total Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
-                                <p><strong>Optimized Route:</strong> <span className="font-code">{combinedResult.tspResult.path.join(' -> ')}</span></p>
+                                <p><strong>Optimized Route:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                             </>
                         ) : <p>Not enough stops for a TSP route.</p>}
                     </div>
@@ -249,9 +280,9 @@ export default function AlgorithmVisualizer() {
                         <h4 className="font-bold mb-2 flex items-center gap-2"><Route size={16}/> Your Quickest Path (Dijkstra)</h4>
                         {combinedResult.shortestPath ? (
                             <>
-                                <p>If we only shipped your order, the fastest single delivery would be from the nearest warehouse.</p>
+                                <p>If we only shipped your order as a priority, the fastest single delivery would be from the nearest warehouse.</p>
                                 <p><strong>Distance:</strong> {combinedResult.shortestPath.distance.toFixed(2)} km</p>
-                                <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPath.path.join(' -> ')}</span></p>
+                                <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPath.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                             </>
                         ) : <p>Your cart is empty. No direct path to calculate.</p>}
                     </div>
@@ -298,10 +329,10 @@ export default function AlgorithmVisualizer() {
                <Button onClick={runTsp} disabled={cartItems.length === 0}>Optimize My Cart Delivery</Button>
               {cartItems.length === 0 && <p className="text-sm text-muted-foreground mt-2">Add items from different warehouses to your cart to plan a delivery route.</p>}
               {tspResult && (
-                <div className="text-sm mt-4">
-                  <p><strong>Required Warehouses:</strong> {Array.from(new Set(cartItems.map(item => item.warehouseId))).join(', ')}</p>
+                <div className="text-sm mt-4 space-y-2">
+                  <p><strong>Required Warehouses:</strong> {Array.from(new Set(cartItems.map(item => item.warehouseId))).map(id => nodeMap.get(id)?.name).join(', ')}</p>
                   <p><strong>Total Distance:</strong> {tspResult.distance.toFixed(2)} km</p>
-                  <p><strong>Route:</strong> <span className="font-code">{tspResult.path.join(' -> ')}</span></p>
+                  <p><strong>Route:</strong> <span className="font-code">{tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                 </div>
               )}
             </TabsContent>
@@ -323,7 +354,7 @@ export default function AlgorithmVisualizer() {
                 <Select value={endNode} onValueChange={setEndNode}>
                   <SelectTrigger className="w-[180px]">
                     <SelectValue placeholder="Select destination" />
-                  </SelectTrigger>
+                  </Trigger>
                   <SelectContent>
                     {allNodes.map(n => (
                       <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
@@ -333,9 +364,9 @@ export default function AlgorithmVisualizer() {
                 <Button onClick={runDijkstra}>Find Path</Button>
               </div>
               {dijkstraResult && (
-                <div className="text-sm">
+                <div className="text-sm space-y-2">
                   <p><strong>Distance:</strong> {dijkstraResult.distance.toFixed(2)} km</p>
-                  <p><strong>Path:</strong> <span className="font-code">{dijkstraResult.path.join(' -> ')}</span></p>
+                  <p><strong>Path:</strong> <span className="font-code">{dijkstraResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                 </div>
               )}
             </TabsContent>

@@ -12,7 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, Warehouse } from 'lucide-react';
+import { nodeMap } from '@/lib/graph';
 
 interface ProductCardProps {
   product: Product;
@@ -20,6 +21,7 @@ interface ProductCardProps {
 
 export default function ProductCard({ product }: ProductCardProps) {
   const { addItem } = useCart();
+  const warehouseName = nodeMap.get(product.warehouseId)?.name || 'Unknown Warehouse';
 
   return (
     <Card className="flex flex-col overflow-hidden transition-all duration-300 hover:shadow-lg hover:-translate-y-1">
@@ -41,14 +43,20 @@ export default function ProductCard({ product }: ProductCardProps) {
           {product.description}
         </CardDescription>
       </CardContent>
-      <CardFooter className="p-4 flex justify-between items-center">
-        <p className="text-lg font-bold text-primary">
-          ${product.price.toFixed(2)}
-        </p>
-        <Button size="sm" onClick={() => addItem(product)}>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Add to Cart
-        </Button>
+      <CardFooter className="p-4 flex flex-col items-start gap-4">
+        <div className="flex justify-between items-center w-full">
+            <p className="text-lg font-bold text-primary">
+            ${product.price.toFixed(2)}
+            </p>
+            <Button size="sm" onClick={() => addItem(product)}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Add to Cart
+            </Button>
+        </div>
+         <div className="text-xs text-muted-foreground flex items-center gap-1.5">
+            <Warehouse className="w-3.5 h-3.5" />
+            Ships from {warehouseName}
+        </div>
       </CardFooter>
     </Card>
   );

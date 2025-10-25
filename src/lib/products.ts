@@ -1,4 +1,5 @@
 import { PlaceHolderImages } from './placeholder-images';
+import { nodes } from './graph';
 
 export interface Product {
   id: string;
@@ -20,7 +21,7 @@ const productImages = PlaceHolderImages.reduce((acc, img) => {
 
 const deliveryLocations = Array.from({ length: 20 }, (_, i) => `loc${i + 1}`);
 
-const warehouses = ['warehouse-a', 'warehouse-b', 'warehouse-c', 'warehouse-d', 'warehouse-e'];
+const warehouses = nodes.filter(n => n.id.includes('warehouse')).map(n => n.id);
 
 export const products: Product[] = [
   {
@@ -30,7 +31,7 @@ export const products: Product[] = [
     price: 699.99,
     image: productImages['product-1'],
     deliveryLocationId: deliveryLocations[0],
-    warehouseId: warehouses[0], // Warehouse A
+    warehouseId: warehouses[1], // Warehouse B
   },
   {
     id: 'prod_2',
@@ -39,7 +40,7 @@ export const products: Product[] = [
     price: 249.99,
     image: productImages['product-2'],
     deliveryLocationId: deliveryLocations[1],
-    warehouseId: warehouses[1], // Warehouse B
+    warehouseId: warehouses[2], // Warehouse C
   },
   {
     id: 'prod_3',
@@ -48,7 +49,7 @@ export const products: Product[] = [
     price: 89.99,
     image: productImages['product-3'],
     deliveryLocationId: deliveryLocations[2],
-    warehouseId: warehouses[2], // Warehouse C
+    warehouseId: warehouses[3], // Warehouse D
   },
   {
     id: 'prod_4',
@@ -57,7 +58,7 @@ export const products: Product[] = [
     price: 199.99,
     image: productImages['product-4'],
     deliveryLocationId: deliveryLocations[3],
-    warehouseId: warehouses[3], // Warehouse D
+    warehouseId: warehouses[4], // Warehouse E
   },
   {
     id: 'prod_5',
@@ -66,7 +67,7 @@ export const products: Product[] = [
     price: 149.99,
     image: productImages['product-5'],
     deliveryLocationId: deliveryLocations[4],
-    warehouseId: warehouses[4], // Warehouse E
+    warehouseId: warehouses[0], // Depot A
   },
   {
     id: 'prod_6',
@@ -75,7 +76,7 @@ export const products: Product[] = [
     price: 349.99,
     image: productImages['product-6'],
     deliveryLocationId: deliveryLocations[5],
-    warehouseId: warehouses[0], // Warehouse A
+    warehouseId: warehouses[1], // Warehouse B
   },
   {
     id: 'prod_7',
@@ -84,7 +85,7 @@ export const products: Product[] = [
     price: 1499.99,
     image: productImages['product-7'],
     deliveryLocationId: deliveryLocations[6],
-    warehouseId: warehouses[1], // Warehouse B
+    warehouseId: warehouses[2], // Warehouse C
   },
   {
     id: 'prod_8',
@@ -93,6 +94,6 @@ export const products: Product[] = [
     price: 79.99,
     image: productImages['product-8'],
     deliveryLocationId: deliveryLocations[7],
-    warehouseId: warehouses[2], // Warehouse C
+    warehouseId: warehouses[3], // Warehouse D
   },
 ];

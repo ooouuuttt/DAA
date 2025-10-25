@@ -82,7 +82,7 @@ const connections: [string, string][] = [
   ['loc20', 'loc10'], ['loc20', 'loc13']
 ];
 
-const nodeMap = new Map(nodes.map(n => [n.id, n]));
+export const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
 export const edges: Edge[] = connections.map(([source, target]) => {
   const sourceNode = nodeMap.get(source)!;
