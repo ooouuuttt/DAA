@@ -19,18 +19,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Trash2, UserPlus } from 'lucide-react';
+import { Trash2, UserPlus } from 'lucide-react';
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { Label } from './ui/label';
 
 export interface SimulatedOrder {
   id: string;
   address: string;
   items: Product[];
+  timeWindow: 'any' | 'morning' | 'afternoon';
 }
 
 interface OrderCreatorProps {
@@ -53,6 +55,7 @@ export function OrderCreator({
       id: `user-${otherOrders.length + 2}`,
       address: 'loc15',
       items: [],
+      timeWindow: 'any',
     };
     onUpdateOtherOrders([...otherOrders, newUser]);
   };
@@ -96,6 +99,10 @@ export function OrderCreator({
   const setOrderAddress = (userId: string, address: string) => {
     updateOrder(userId, (order) => ({...order, address}));
   };
+  
+  const setTimeWindow = (userId: string, timeWindow: SimulatedOrder['timeWindow']) => {
+    updateOrder(userId, (order) => ({...order, timeWindow}));
+  }
 
   const locationNodes = allNodes.filter(n => !n.id.includes('warehouse'));
   
@@ -114,9 +121,9 @@ export function OrderCreator({
                 </Button>
             )}
           </CardHeader>
-          <CardContent className="p-4 pt-0 space-y-4">
-             <div>
-                <label className="text-xs font-medium">Delivery Address</label>
+          <CardContent className="p-4 pt-0 grid grid-cols-2 gap-4">
+             <div className="col-span-2">
+                <Label className="text-xs font-medium">Delivery Address</Label>
                  <Select value={order.address} onValueChange={(val) => setOrderAddress(order.id, val)}>
                     <SelectTrigger>
                         <SelectValue placeholder="Select address" />
@@ -128,8 +135,23 @@ export function OrderCreator({
                     </SelectContent>
                 </Select>
              </div>
-             <div>
-                <label className="text-xs font-medium">Items</label>
+             
+             <div className="col-span-2">
+                <Label className="text-xs font-medium">Delivery Time Window</Label>
+                 <Select value={order.timeWindow} onValueChange={(val: SimulatedOrder['timeWindow']) => setTimeWindow(order.id, val)}>
+                    <SelectTrigger>
+                        <SelectValue placeholder="Select time window" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="any">Any Time</SelectItem>
+                        <SelectItem value="morning">Morning</SelectItem>
+                        <SelectItem value="afternoon">Afternoon</SelectItem>
+                    </SelectContent>
+                </Select>
+             </div>
+
+             <div className="col-span-2">
+                <Label className="text-xs font-medium">Items</Label>
                 <div className="space-y-1">
                     {order.items.map((item, index) => (
                         <div key={index} className="flex items-center justify-between bg-background p-1.5 rounded-md text-xs">
@@ -142,7 +164,7 @@ export function OrderCreator({
                      {order.items.length === 0 && <p className="text-xs text-muted-foreground text-center py-2">No items in this order.</p>}
                 </div>
              </div>
-             <div>
+             <div className="col-span-2">
                 <Select onValueChange={(prodId) => addProductToOrder(order.id, prodId)}>
                     <SelectTrigger>
                         <SelectValue placeholder="Add an item..."/>

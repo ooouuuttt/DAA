@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Card,
   CardContent,
@@ -10,22 +9,25 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { nodes as allNodes, edges as allEdges, nodeMap } from '@/lib/graph';
+import { nodes as allNodes, edges as initialEdges, nodeMap } from '@/lib/graph';
 import DummyMap from '@/components/DummyMap';
 import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split, User, Eye } from 'lucide-react';
+import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split, User, Eye, RefreshCw, AlertTriangle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import type { Product } from '@/lib/products';
 import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 
+const COST_PER_KM = 1.5; // $1.50 per kilometer
+const COST_PER_TRUCK = 50; // $50 fixed cost per truck dispatched
+const TRUCK_CAPACITY = 10; // Max 10 items per truck
 
 type DijkstraResult = { path: string[]; distance: number } | null;
-type TspResult = { path: string[]; distance: number } | null;
+type TspResult = { path:string[]; distance: number } | null;
 type MaxFlowResult = number | null;
 
 type SplitShipment = {
@@ -33,41 +35,49 @@ type SplitShipment = {
     warehouseName: string;
     path: DijkstraResult;
     items: Product[];
+    cost: number;
 }
 
 type OrderShipments = {
   orderId: string;
   address: string;
   shipments: SplitShipment[];
+  totalCost: number;
 }
 
 type WarehouseBatchResult = {
     warehouseId: string;
     warehouseName: string;
-    route: TspResult;
-    customers: string[];
-    items: { productName: string; orderId: string; customerAddress: string; }[];
+    routes: {
+        truck: number;
+        route: TspResult;
+        customers: string[];
+        items: { productName: string; orderId: string; customerAddress: string; }[];
+        cost: number;
+    }[];
+    totalCost: number;
 };
+
+type ConsolidatedTspResult = {
+    route: TspResult;
+    cost: number;
+}
 
 type CombinedResult = {
   // Strategy 1
   allOrderShipments: OrderShipments[];
+  totalCostStrategy1: number;
   // Strategy 2
-  consolidatedTspResult: TspResult;
+  consolidatedTspResult: ConsolidatedTspResult | null;
   requiredWarehousesForTsp: string[];
-  deliveryAddressesForTsp: string[];
+  deliveryAddressesForTsp: { address: string, timeWindow: SimulatedOrder['timeWindow'] }[];
   warehouseManifest: Record<string, {productName: string, orderId: string}[]>;
   // Strategy 3
   warehouseBatchResults: WarehouseBatchResult[];
+  totalCostStrategy3: number;
   // Standalone Analysis
   maxFlowToFirstCustomer: MaxFlowResult;
 };
-
-type HighlightedNode = {
-  id: string;
-  type: 'depot' | 'warehouse' | 'customer';
-};
-
 
 export default function CheckoutPage() {
   const { items: mainUserCart, clearCart: clearMainUserCart } = useCart();
@@ -76,18 +86,38 @@ export default function CheckoutPage() {
     id: 'you',
     address: 'loc10',
     items: mainUserCart,
+    timeWindow: 'any',
   });
 
   const [otherOrders, setOtherOrders] = useState<SimulatedOrder[]>([]);
   const [combinedResult, setCombinedResult] = useState<CombinedResult | null>(null);
   const [activeMap, setActiveMap] = useState<string>('strategy-2');
+  const [currentEdges, setCurrentEdges] = useState(initialEdges);
+  const [isTrafficSimulated, setIsTrafficSimulated] = useState(false);
 
   // Update main user's order when their cart changes
-  useMemo(() => {
+  useEffect(() => {
     setMainUserOrder(prev => ({...prev, items: mainUserCart}));
   }, [mainUserCart]);
 
   const allSimulatedOrders = useMemo(() => [mainUserOrder, ...otherOrders], [mainUserOrder, otherOrders]);
+
+  const simulateTraffic = () => {
+    const newEdges = initialEdges.map(edge => {
+        // Randomly select ~30% of edges to apply traffic to
+        if (Math.random() < 0.3) {
+            return { ...edge, weight: edge.weight * (1.5 + Math.random() * 2) }; // Increase weight by 50% to 250%
+        }
+        return edge;
+    });
+    setCurrentEdges(newEdges);
+    setIsTrafficSimulated(true);
+  };
+
+  const resetTraffic = () => {
+    setCurrentEdges(initialEdges);
+    setIsTrafficSimulated(false);
+  };
 
   const runCombinedOptimization = () => {
     if (allSimulatedOrders.every(o => o.items.length === 0)) {
@@ -98,6 +128,7 @@ export default function CheckoutPage() {
     const activeOrders = allSimulatedOrders.filter(order => order.items.length > 0);
 
     // --- Strategy 1: Prioritize Speed (The Amazon Model) ---
+    let totalCostStrategy1 = 0;
     const allOrderShipments: OrderShipments[] = activeOrders.map(order => {
         const itemsByWarehouse: Record<string, Product[]> = {};
         order.items.forEach(item => {
@@ -106,16 +137,19 @@ export default function CheckoutPage() {
         });
 
         const shipments: SplitShipment[] = Object.entries(itemsByWarehouse).map(([warehouseId, items]) => {
-            const path = dijkstra(allNodes, allEdges, warehouseId, order.address);
+            const path = dijkstra(allNodes, currentEdges, warehouseId, order.address);
+            const cost = path ? (path.distance * COST_PER_KM) + COST_PER_TRUCK : 0;
             return {
                 warehouseId,
                 warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
                 path,
                 items,
+                cost
             };
         });
-        
-        return { orderId: order.id, address: order.address, shipments };
+        const totalCost = shipments.reduce((acc, s) => acc + s.cost, 0);
+        totalCostStrategy1 += totalCost;
+        return { orderId: order.id, address: order.address, shipments, totalCost };
     });
 
     // --- Strategy 2: Prioritize Efficiency (The Local Delivery Model) ---
@@ -130,10 +164,15 @@ export default function CheckoutPage() {
       });
     });
 
-    const allDeliveryAddressesForTsp = new Set<string>(activeOrders.map(o => o.address));
-    const consolidatedTspResult = solveTsp(allNodes, allEdges, 'warehouse-a', Array.from(allRequiredWarehousesForTsp), Array.from(allDeliveryAddressesForTsp));
+    const allDeliveryAddressesForTsp = activeOrders.map(o => ({ address: o.address, timeWindow: o.timeWindow }));
+    const consolidatedTspRoute = solveTsp(allNodes, currentEdges, 'warehouse-a', Array.from(allRequiredWarehousesForTsp), allDeliveryAddressesForTsp);
+    const consolidatedTspResult: ConsolidatedTspResult | null = consolidatedTspRoute ? {
+        route: consolidatedTspRoute,
+        cost: (consolidatedTspRoute.distance * COST_PER_KM) + COST_PER_TRUCK,
+    } : null;
     
     // --- Strategy 3: Warehouse-Based Batching ---
+    let totalCostStrategy3 = 0;
     const itemsByWarehouseForBatching: Record<string, { product: Product; order: SimulatedOrder }[]> = {};
     activeOrders.forEach(order => {
         order.items.forEach(item => {
@@ -143,19 +182,41 @@ export default function CheckoutPage() {
     });
 
     const warehouseBatchResults: WarehouseBatchResult[] = Object.entries(itemsByWarehouseForBatching).map(([warehouseId, ordersAndItems]) => {
-        const customerAddresses = new Set(ordersAndItems.map(oi => oi.order.address));
-        const route = solveTsp(allNodes, allEdges, warehouseId, [], Array.from(customerAddresses)); // TSP from this warehouse to its customers
-        const items = ordersAndItems.map(oi => ({
-            productName: oi.product.name,
-            orderId: oi.order.id,
-            customerAddress: oi.order.address,
-        }));
+        const totalItems = ordersAndItems.length;
+        const numTrucks = Math.ceil(totalItems / TRUCK_CAPACITY);
+        const routes = [];
+        let itemsForTrucks = [...ordersAndItems];
+        let truckTotalCost = 0;
+
+        for (let i = 0; i < numTrucks; i++) {
+            const truckItems = itemsForTrucks.splice(0, TRUCK_CAPACITY);
+            const customerDestinations = [...new Set(truckItems.map(oi => oi.order.address))].map(address => {
+                const order = truckItems.find(oi => oi.order.address === address)!.order;
+                return { address, timeWindow: order.timeWindow };
+            });
+
+            const route = solveTsp(allNodes, currentEdges, warehouseId, [], customerDestinations);
+            const cost = route ? (route.distance * COST_PER_KM) + COST_PER_TRUCK : 0;
+            truckTotalCost += cost;
+
+            routes.push({
+                truck: i + 1,
+                route,
+                customers: customerDestinations.map(c => c.address),
+                items: truckItems.map(oi => ({
+                    productName: oi.product.name,
+                    orderId: oi.order.id,
+                    customerAddress: oi.order.address,
+                })),
+                cost,
+            });
+        }
+        totalCostStrategy3 += truckTotalCost;
         return {
             warehouseId,
             warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
-            route,
-            customers: Array.from(customerAddresses),
-            items,
+            routes,
+            totalCost: truckTotalCost,
         };
     });
 
@@ -166,60 +227,74 @@ export default function CheckoutPage() {
     const userWarehouses = new Set(mainUserOrder.items.map(item => item.warehouseId));
     if (userWarehouses.size > 0) {
         userWarehouses.forEach(wh => {
-            const path = dijkstra(allNodes, allEdges, wh, mainUserOrder.address);
+            const path = dijkstra(allNodes, currentEdges, wh, mainUserOrder.address);
             if (path && path.distance < minDistance) {
                 minDistance = path.distance;
                 nearestWarehouseForMaxFlow = wh;
             }
         });
     }
-    const maxFlowToFirstCustomer = nearestWarehouseForMaxFlow ? edmondsKarp(allNodes, allEdges, nearestWarehouseForMaxFlow, mainUserOrder.address) : null;
+    const maxFlowToFirstCustomer = nearestWarehouseForMaxFlow ? edmondsKarp(allNodes, currentEdges, nearestWarehouseForMaxFlow, mainUserOrder.address) : null;
     
-    setActiveMap('strategy-2');
     setCombinedResult({
       allOrderShipments,
+      totalCostStrategy1,
       consolidatedTspResult,
       requiredWarehousesForTsp: Array.from(allRequiredWarehousesForTsp),
-      deliveryAddressesForTsp: Array.from(allDeliveryAddressesForTsp),
+      deliveryAddressesForTsp: allDeliveryAddressesForTsp,
       warehouseManifest,
       warehouseBatchResults,
+      totalCostStrategy3,
       maxFlowToFirstCustomer,
     });
+    if (!activeMap) {
+        setActiveMap('strategy-2');
+    }
   };
+  
+  // Re-run simulation if traffic changes
+  useEffect(() => {
+    if (combinedResult) {
+      runCombinedOptimization();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentEdges]);
 
   const resetSimulation = () => {
     clearMainUserCart();
     setOtherOrders([]);
     setCombinedResult(null);
+    resetTraffic();
   };
   
   const { mapPath, mapHighlights } = useMemo(() => {
     if (!combinedResult) return { mapPath: [], mapHighlights: [] };
 
-    if (activeMap === 'strategy-2') {
+    if (activeMap === 'strategy-2' && combinedResult.consolidatedTspResult?.route) {
         const depot = { id: 'warehouse-a', type: 'depot' as const };
         const warehouses = combinedResult.requiredWarehousesForTsp.map(id => ({ id, type: 'warehouse' as const }));
-        const customers = combinedResult.deliveryAddressesForTsp.map(id => ({ id, type: 'customer' as const }));
+        const customers = combinedResult.deliveryAddressesForTsp.map(c => ({ id: c.address, type: 'customer' as const }));
         return {
-            mapPath: combinedResult.consolidatedTspResult?.path || [],
+            mapPath: combinedResult.consolidatedTspResult.route.path || [],
             mapHighlights: [depot, ...warehouses, ...customers]
         };
     }
 
     if (activeMap.startsWith('strategy-3-')) {
-        const warehouseId = activeMap.replace('strategy-3-', '');
+        const [_, warehouseId, truckNum] = activeMap.split('-');
         const batch = combinedResult.warehouseBatchResults.find(b => b.warehouseId === warehouseId);
-        if (batch) {
+        const truckRoute = batch?.routes.find(r => r.truck === parseInt(truckNum));
+        
+        if (truckRoute) {
             const warehouse = { id: batch.warehouseId, type: 'warehouse' as const };
-            const customers = batch.customers.map(id => ({ id, type: 'customer' as const }));
+            const customers = truckRoute.customers.map(id => ({ id, type: 'customer' as const }));
             return {
-                mapPath: batch.route?.path || [],
+                mapPath: truckRoute.route?.path || [],
                 mapHighlights: [warehouse, ...customers]
             };
         }
     }
     
-    // Default or Strategy 1 (no path)
     return { mapPath: [], mapHighlights: [] };
 
   }, [combinedResult, activeMap]);
@@ -230,15 +305,18 @@ export default function CheckoutPage() {
         {path.map((id, index) => {
             const name = nodeMap.get(id)?.name || id;
             const isCustomer = customerLocations.includes(id);
-            const isWaypoint = !nodeMap.get(id)?.id.includes('loc');
+            const isWaypoint = !nodeMap.get(id)?.id.includes('loc') && !isCustomer;
 
+            let nameEl;
             if (isCustomer) {
-                return <span key={index} className="text-green-600 font-bold">{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
+                nameEl = <span className="text-green-600 font-bold">{name}</span>;
+            } else if (isWaypoint) {
+                nameEl = <span className="font-medium">{name}</span>;
+            } else {
+                nameEl = <span className="text-muted-foreground">{name}</span>;
             }
-             if (isWaypoint) {
-                return <span key={index}>{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
-            }
-            return <span key={index} className="text-muted-foreground">{name}{index < path.length - 1 ? ' -> ' : ''}</span>;
+
+            return <React.Fragment key={index}>{nameEl}{index < path.length - 1 ? <span className="text-muted-foreground/50"> -> </span> : ''}</React.Fragment>;
         })}
       </span>
     );
@@ -249,7 +327,7 @@ export default function CheckoutPage() {
        <div>
         <h1 className="text-4xl font-bold font-headline">Logistics Control Panel</h1>
         <p className="mt-2 text-lg text-muted-foreground">
-          Simulate and compare real-world delivery backend strategies.
+          Simulate and compare real-world delivery backend strategies with dynamic costs and constraints.
         </p>
       </div>
 
@@ -262,12 +340,18 @@ export default function CheckoutPage() {
               onUpdateOtherOrders={setOtherOrders}
               allNodes={allNodes}
             />
-            <div className="flex gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <Button onClick={runCombinedOptimization} className="w-full" disabled={allSimulatedOrders.every(o => o.items.length === 0)}>
-                <Combine className="mr-2"/> Run Logistics Simulation
+                <Combine className="mr-2"/> Run Simulation
               </Button>
                <Button onClick={resetSimulation} variant="outline" className="w-full">
-                Reset
+                Reset All
+              </Button>
+               <Button onClick={simulateTraffic} variant="secondary" className="w-full" disabled={isTrafficSimulated}>
+                <AlertTriangle className="mr-2"/> Simulate Traffic
+              </Button>
+               <Button onClick={resetTraffic} variant="destructive" className="w-full" disabled={!isTrafficSimulated}>
+                <RefreshCw className="mr-2"/> Reset Traffic
               </Button>
             </div>
         </div>
@@ -275,31 +359,44 @@ export default function CheckoutPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Simulation Map</CardTitle>
-                    <CardDescription>Visual representation of delivery routes and locations. Select a strategy below to see its path on the map.</CardDescription>
+                    <CardDescription>Visual representation of delivery routes. Select a strategy below to see its path on the map.</CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <DummyMap nodes={allNodes} edges={allEdges} highlightedPath={mapPath} highlightedNodes={mapHighlights} />
+                    <DummyMap nodes={allNodes} edges={currentEdges} highlightedPath={mapPath} highlightedNodes={mapHighlights} />
                 </CardContent>
             </Card>
             {combinedResult && (
                 <Card>
                     <CardHeader>
                         <CardTitle>Optimization Results: A Tale of Three Strategies</CardTitle>
+                        <CardDescription>Costs are based on ${COST_PER_KM.toFixed(2)}/km and a ${COST_PER_TRUCK.toFixed(2)} fixed cost per truck.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6 text-sm">
-                        <RadioGroup value={activeMap} onValueChange={setActiveMap}>
+                        <RadioGroup value={activeMap} onValueChange={setActiveMap} className="gap-6">
                             <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200">
-                                <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Prioritize Speed (The Amazon Model)</h4>
-                                <p className="text-xs text-muted-foreground mb-3">
-                                This model's goal is to get every item to its customer as fast as possible, ignoring truck efficiency. Each part of an order ships separately and directly from its warehouse. Notice how if two users order from the same warehouse, the system calculates two separate, independent trips.
-                                </p>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Prioritize Speed (The Amazon Model)</h4>
+                                        <p className="text-xs text-muted-foreground mb-3 pr-4">
+                                            Each customer's order is split into multiple shipments to get items to them as fast as possible. This is expensive but offers maximum speed.
+                                        </p>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                        <p className="font-bold text-lg text-blue-900">${combinedResult.totalCostStrategy1.toFixed(2)}</p>
+                                        <p className="text-xs text-muted-foreground">Total Cost</p>
+                                    </div>
+                                </div>
+                                
                                 {combinedResult.allOrderShipments.length > 0 ? (
                                     combinedResult.allOrderShipments.map((order, orderIndex) => (
                                         <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
                                             <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.id}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
                                             {order.shipments.map((shipment, index) => (
                                                 <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
-                                                    <p className="font-medium text-primary">Shipment {index + 1} from {shipment.warehouseName}</p>
+                                                    <div className="flex justify-between items-center">
+                                                        <p className="font-medium text-primary">Shipment from {shipment.warehouseName}</p>
+                                                        <p className="font-semibold text-xs">${shipment.cost.toFixed(2)}</p>
+                                                    </div>
                                                     <ul className="text-xs list-disc pl-5 text-muted-foreground">
                                                         {shipment.items.map((item, itemIndex) => (
                                                             <li key={itemIndex}>{item.name}</li>
@@ -322,14 +419,19 @@ export default function CheckoutPage() {
                             
                             <div className="p-4 bg-muted/50 rounded-lg border">
                                 <div className="flex items-center justify-between mb-2">
-                                     <h4 className="font-bold flex items-center gap-2"><Truck size={16}/> Strategy 2: Prioritize Efficiency (The Local Delivery Model)</h4>
+                                     <h4 className="font-bold flex items-center gap-2"><Truck size={16}/> Strategy 2: Max Efficiency (The Local Courier)</h4>
                                      <div className="flex items-center space-x-2">
                                         <RadioGroupItem value="strategy-2" id="map-strat-2" />
                                         <Label htmlFor="map-strat-2" className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
                                     </div>
                                 </div>
-                                <p className="text-xs text-muted-foreground mb-3">This model's goal is to use as few trucks as possible. A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything for everyone, delivers to all customers on an optimized route, and finally returns to the depot.
-                                </p>
+                                <div className="flex justify-between items-start">
+                                    <p className="text-xs text-muted-foreground mb-3 pr-4">A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything, delivers to all customers, then returns. Most fuel-efficient, but complex and slow.</p>
+                                     <div className="text-right flex-shrink-0">
+                                        <p className="font-bold text-lg">${combinedResult.consolidatedTspResult?.cost.toFixed(2) ?? '0.00'}</p>
+                                        <p className="text-xs text-muted-foreground">Total Cost</p>
+                                    </div>
+                                </div>
                                 
                                 <div className="space-y-3">
                                     <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Central Pickup Manifest:</h5>
@@ -353,44 +455,62 @@ export default function CheckoutPage() {
                                 
                                 <Separator className="my-4"/>
 
-                                {combinedResult.consolidatedTspResult ? (
+                                {combinedResult.consolidatedTspResult?.route ? (
                                     <div className="space-y-2">
-                                        <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.distance.toFixed(2)} km</p>
-                                        <p><strong>Optimized Route for One Truck:</strong> {renderPath(combinedResult.consolidatedTspResult.path, combinedResult.deliveryAddressesForTsp)}</p>
+                                        <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.route.distance.toFixed(2)} km</p>
+                                        <p><strong>Optimized Route for One Truck:</strong> {renderPath(combinedResult.consolidatedTspResult.route.path, combinedResult.deliveryAddressesForTsp.map(c=>c.address))}</p>
                                     </div>
                                 ) : <p>Not enough stops for a TSP route.</p>}
                             </div>
 
                             <div className="p-4 bg-green-50/50 rounded-lg border border-green-200">
-                                <h4 className="font-bold mb-2 flex items-center gap-2 text-green-800"><Package size={16}/> Strategy 3: Hybrid Batching by Warehouse</h4>
-                                <p className="text-xs text-muted-foreground mb-3">
-                                    This hybrid model dispatches a separate truck from each required warehouse. Each truck picks up all items from its home base and runs an optimized mini-route to deliver only to its assigned customers before returning.
-                                </p>
+                                 <div className="flex justify-between items-start">
+                                    <div>
+                                        <h4 className="font-bold mb-2 flex items-center gap-2 text-green-800"><Package size={16}/> Strategy 3: Hybrid Batching by Warehouse</h4>
+                                        <p className="text-xs text-muted-foreground mb-3 pr-4">
+                                            A separate truck is dispatched from each required warehouse. Each truck runs an optimized mini-route for its assigned customers. A great balance of speed and cost.
+                                        </p>
+                                    </div>
+                                    <div className="text-right flex-shrink-0">
+                                        <p className="font-bold text-lg text-green-900">${combinedResult.totalCostStrategy3.toFixed(2)}</p>
+                                        <p className="text-xs text-muted-foreground">Total Cost</p>
+                                    </div>
+                                </div>
+
                                 {combinedResult.warehouseBatchResults.map((batch, index) => (
                                     <div key={index} className="p-3 bg-white rounded-md border mb-3">
-                                        <div className="flex items-center justify-between mb-2">
+                                        <div className="flex items-start justify-between mb-2">
                                             <p className="font-bold text-primary flex items-center gap-2"><Warehouse size={14}/> Batch from <span className="text-green-800">{batch.warehouseName}</span></p>
-                                            <div className="flex items-center space-x-2">
-                                                <RadioGroupItem value={`strategy-3-${batch.warehouseId}`} id={`map-strat-3-${batch.warehouseId}`} />
-                                                <Label htmlFor={`map-strat-3-${batch.warehouseId}`} className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
+                                            <div className="text-right">
+                                                <p className="font-semibold text-xs">${batch.totalCost.toFixed(2)}</p>
+                                                <p className="text-xs text-muted-foreground">{batch.routes.length} truck(s)</p>
                                             </div>
                                         </div>
-                                        <div className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-green-300">
+                                        {batch.routes.map((truckRoute, truckIndex) => (
+                                        <div key={truckIndex} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-green-300">
+                                            <div className="flex items-center justify-between mb-2">
+                                                <p className="font-semibold text-primary/90 flex items-center gap-2"><Truck size={14}/> Truck {truckRoute.truck} Route</p>
+                                                <div className="flex items-center space-x-2">
+                                                    <RadioGroupItem value={`strategy-3-${batch.warehouseId}-${truckRoute.truck}`} id={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} />
+                                                    <Label htmlFor={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
+                                                </div>
+                                            </div>
                                             <h5 className="font-semibold">Pickup Manifest:</h5>
                                             <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                                {batch.items.map((item, itemIndex) => (
+                                                {truckRoute.items.map((item, itemIndex) => (
                                                     <li key={itemIndex}>
                                                         <span className="font-semibold">{item.productName}</span> for <span className="font-semibold text-primary/80">{item.orderId}</span> (to {nodeMap.get(item.customerAddress)?.name})
                                                     </li>
                                                 ))}
                                             </ul>
-                                            {batch.route ? (
+                                            {truckRoute.route ? (
                                                 <div className="pt-2">
-                                                    <p><strong>Mini-Route Distance:</strong> {batch.route.distance.toFixed(2)} km</p>
-                                                    <p><strong>Mini-Route Path:</strong> {renderPath(batch.route.path, batch.customers)}</p>
+                                                    <p><strong>Route Distance:</strong> {truckRoute.route.distance.toFixed(2)} km</p>
+                                                    <p><strong>Route Path:</strong> {renderPath(truckRoute.route.path, truckRoute.customers)}</p>
                                                 </div>
                                             ) : <p className="text-destructive-foreground">Not enough stops for a route.</p>}
                                         </div>
+                                        ))}
                                     </div>
                                 ))}
                             </div>
@@ -398,12 +518,12 @@ export default function CheckoutPage() {
 
                          <div className="p-4 bg-muted/50 rounded-lg border">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
-                            <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your main order. It helps find bottlenecks.</p>
+                            <p className="text-xs text-muted-foreground mb-4">A theoretical calculation for network planning, focusing only on the roads for *your* order. It helps find bottlenecks.</p>
                             <div >
                                 <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
                                 {combinedResult.maxFlowToFirstCustomer !== null ? (
                                     <>
-                                        <p>This shows the maximum number of packages that could possibly be moved between the closest warehouse and your address per hour, if all roads were used optimally.</p>
+                                        <p>The shows the maximum number of packages that could be moved between the closest warehouse and your address per hour, if all roads were used optimally.</p>
                                         <p><strong>Max Capacity:</strong> {combinedResult.maxFlowToFirstCustomer} packages/hour</p>
                                     </>
                                 ) : <p>Your cart is empty. No capacity to calculate.</p>}
