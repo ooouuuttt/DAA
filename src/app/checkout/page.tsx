@@ -248,11 +248,11 @@ export default function CheckoutPage() {
                         
                         <div className="p-4 bg-muted/50 rounded-lg">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Strategy 2: Consolidated Shipping for All Orders (Fewer Trucks)</h4>
-                            <p className="text-xs text-muted-foreground mb-3">A single truck serves all orders (yours and other customers'). It starts at the central depot ({nodeMap.get('warehouse-a')?.name}), visits the necessary warehouses, delivers to all customers, then returns.</p>
+                            <p className="text-xs text-muted-foreground mb-3">A single truck serves all orders (yours and other customers'). It starts at the central depot ({nodeMap.get('warehouse-a')?.name}), visits the necessary warehouses to pick up all items, delivers to all customers, then returns.</p>
                             
                             <div className="space-y-3">
-                                <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Warehouse Pickups:</h5>
-                                {combinedResult.requiredWarehouses.length > 0 ? (
+                                <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Warehouse Pickup Manifest:</h5>
+                                {Object.keys(combinedResult.warehouseManifest).length > 0 ? (
                                     Object.entries(combinedResult.warehouseManifest).map(([whId, items]) => (
                                         <div key={whId} className="pl-4 border-l-2 ml-2">
                                             <p className="font-medium text-primary">{nodeMap.get(whId)?.name}</p>
@@ -301,5 +301,7 @@ export default function CheckoutPage() {
     </div>
   );
 }
+
+    
 
     
