@@ -1,4 +1,4 @@
-import type { Node, Edge } from '../graph';
+import type { Node, Edge } from './graph';
 
 // Helper for Dijkstra's algorithm to find shortest paths between any two nodes
 function findShortestPath(fromNodeId: string, toNodeId: string, nodes: Node[], adj: { [key: string]: { [key: string]: number } }) {
@@ -38,6 +38,10 @@ function findShortestPath(fromNodeId: string, toNodeId: string, nodes: Node[], a
 // Heuristic solver for a TSP-like problem with separate pickup and delivery phases.
 export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, warehousesToVisit: string[], deliveryAddresses: string[]) {
   if (warehousesToVisit.length === 0 && deliveryAddresses.length === 0) {
+    // If there are no stops, the truck just stays at the depot.
+     if (deliveryAddresses.length > 0 || warehousesToVisit.length > 0) {
+      return { path: [startDepot, startDepot], distance: 0 };
+    }
     return { path: [startDepot], distance: 0 };
   }
   
@@ -49,7 +53,7 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
   });
 
   // Create a complete distance matrix for all relevant nodes (depot, warehouses, customers)
-  const relevantNodes = [startDepot, ...warehousesToVisit, ...deliveryAddresses];
+  const relevantNodes = [...new Set([startDepot, ...warehousesToVisit, ...deliveryAddresses])];
   const distMatrix: { [key: string]: { [key: string]: number } } = {};
 
   for (const fromNode of relevantNodes) {
@@ -67,7 +71,7 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
   let totalDistance = 0;
   let currentLoc = startDepot;
 
-  // Phase 1: Pickups from warehouses
+  // Phase 1: Pickups from warehouses (using nearest neighbor heuristic)
   let unvisitedWarehouses = new Set(warehousesToVisit);
   while (unvisitedWarehouses.size > 0) {
     let nearest: string | null = null;
@@ -87,11 +91,11 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
       finalPath.push(currentLoc);
       unvisitedWarehouses.delete(currentLoc);
     } else {
-      break; // Should not happen
+      break; // Should not happen if there are unvisited warehouses
     }
   }
 
-  // Phase 2: Deliveries to customers
+  // Phase 2: Deliveries to customers (using nearest neighbor heuristic)
   let unvisitedCustomers = new Set(deliveryAddresses);
   while (unvisitedCustomers.size > 0) {
     let nearest: string | null = null;
@@ -111,13 +115,16 @@ export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, wareh
       finalPath.push(currentLoc);
       unvisitedCustomers.delete(currentLoc);
     } else {
-      break; // Should not happen
+      break; // Should not happen if there are unvisited customers
     }
   }
   
   // Phase 3: Return to depot
-  totalDistance += distMatrix[currentLoc][startDepot];
-  finalPath.push(startDepot);
+  const returnDistance = distMatrix[currentLoc] ? distMatrix[currentLoc][startDepot] : 0;
+  if (returnDistance !== undefined) {
+    totalDistance += returnDistance;
+    finalPath.push(startDepot);
+  }
 
   return { path: finalPath, distance: totalDistance };
 }
