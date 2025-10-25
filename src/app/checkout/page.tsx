@@ -39,15 +39,26 @@ type OrderShipments = {
   shipments: SplitShipment[];
 }
 
+type WarehouseBatchResult = {
+    warehouseId: string;
+    warehouseName: string;
+    route: TspResult;
+    customers: string[];
+    items: { productName: string; orderId: string; customerAddress: string; }[];
+};
+
 type CombinedResult = {
-  tspResult: TspResult;
-  // This is the "split shipment" model for ALL orders
+  // Strategy 1
   allOrderShipments: OrderShipments[];
-  maxFlowToFirstCustomer: MaxFlowResult; // This remains a theoretical analysis for the main user
-  // These are for the combined TSP route
+  // Strategy 2
+  consolidatedTspResult: TspResult;
   requiredWarehouses: string[];
   deliveryAddresses: string[];
   warehouseManifest: Record<string, {productName: string, orderId: string}[]>;
+  // Strategy 3
+  warehouseBatchResults: WarehouseBatchResult[];
+  // Standalone Analysis
+  maxFlowToFirstCustomer: MaxFlowResult;
 };
 
 export default function CheckoutPage() {
@@ -74,16 +85,14 @@ export default function CheckoutPage() {
       setCombinedResult(null);
       return;
     }
+    
+    const activeOrders = allSimulatedOrders.filter(order => order.items.length > 0);
 
-    // --- Start of Amazon-style "Split Shipment" Logic for ALL orders ---
-    const allOrderShipments: OrderShipments[] = allSimulatedOrders
-      .filter(order => order.items.length > 0)
-      .map(order => {
+    // --- Strategy 1: Prioritize Speed (The Amazon Model) ---
+    const allOrderShipments: OrderShipments[] = activeOrders.map(order => {
         const itemsByWarehouse: Record<string, Product[]> = {};
         order.items.forEach(item => {
-            if (!itemsByWarehouse[item.warehouseId]) {
-                itemsByWarehouse[item.warehouseId] = [];
-            }
+            if (!itemsByWarehouse[item.warehouseId]) itemsByWarehouse[item.warehouseId] = [];
             itemsByWarehouse[item.warehouseId].push(item);
         });
 
@@ -99,35 +108,50 @@ export default function CheckoutPage() {
         
         return { orderId: order.id, address: order.address, shipments };
     });
-    // --- End of "Split Shipment" Logic ---
 
-
-    // --- Start of Consolidated/Batch Logic for ALL users ---
+    // --- Strategy 2: Prioritize Efficiency (The Local Delivery Model) ---
     const allRequiredWarehouses = new Set<string>();
     const warehouseManifest: CombinedResult['warehouseManifest'] = {};
 
-    allSimulatedOrders.forEach(order => {
-      if(order.items.length === 0) return;
+    activeOrders.forEach(order => {
       order.items.forEach(item => {
         allRequiredWarehouses.add(item.warehouseId);
-        if (!warehouseManifest[item.warehouseId]) {
-            warehouseManifest[item.warehouseId] = [];
-        }
-        warehouseManifest[item.warehouseId].push({
-            productName: item.name,
-            orderId: order.id
-        });
+        if (!warehouseManifest[item.warehouseId]) warehouseManifest[item.warehouseId] = [];
+        warehouseManifest[item.warehouseId].push({ productName: item.name, orderId: order.id });
       });
     });
 
-    const allDeliveryAddresses = new Set<string>(allSimulatedOrders.filter(o => o.items.length > 0).map(o => o.address));
+    const allDeliveryAddresses = new Set<string>(activeOrders.map(o => o.address));
+    const consolidatedTspResult = solveTsp(allNodes, allEdges, 'warehouse-a', Array.from(allRequiredWarehouses), Array.from(allDeliveryAddresses));
     
-    // TSP from a central depot to all required warehouses then to all customers.
-    const tspResult = solveTsp(allNodes, allEdges, 'warehouse-a', Array.from(allRequiredWarehouses), Array.from(allDeliveryAddresses));
-    // --- End of Consolidated Logic ---
+    // --- Strategy 3: Warehouse-Based Batching ---
+    const itemsByWarehouseForBatching: Record<string, { product: Product; order: SimulatedOrder }[]> = {};
+    activeOrders.forEach(order => {
+        order.items.forEach(item => {
+            if (!itemsByWarehouseForBatching[item.warehouseId]) itemsByWarehouseForBatching[item.warehouseId] = [];
+            itemsByWarehouseForBatching[item.warehouseId].push({ product: item, order: order });
+        });
+    });
+
+    const warehouseBatchResults: WarehouseBatchResult[] = Object.entries(itemsByWarehouseForBatching).map(([warehouseId, ordersAndItems]) => {
+        const customerAddresses = new Set(ordersAndItems.map(oi => oi.order.address));
+        const route = solveTsp(allNodes, allEdges, warehouseId, [], Array.from(customerAddresses)); // TSP from this warehouse to its customers
+        const items = ordersAndItems.map(oi => ({
+            productName: oi.product.name,
+            orderId: oi.order.id,
+            customerAddress: oi.order.address,
+        }));
+        return {
+            warehouseId,
+            warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
+            route,
+            customers: Array.from(customerAddresses),
+            items,
+        };
+    });
 
 
-    // --- Start of Standalone Analysis (Max-Flow for the main user only) ---
+    // --- Standalone Analysis (Max-Flow for the main user only) ---
     let nearestWarehouseForMaxFlow = '';
     let minDistance = Infinity;
     const userWarehouses = new Set(mainUserOrder.items.map(item => item.warehouseId));
@@ -141,16 +165,15 @@ export default function CheckoutPage() {
         });
     }
     const maxFlowToFirstCustomer = nearestWarehouseForMaxFlow ? edmondsKarp(allNodes, allEdges, nearestWarehouseForMaxFlow, mainUserOrder.address) : null;
-    // --- End of Standalone Analysis ---
-
 
     setCombinedResult({
-      tspResult,
       allOrderShipments,
-      maxFlowToFirstCustomer,
+      consolidatedTspResult,
       requiredWarehouses: Array.from(allRequiredWarehouses),
       deliveryAddresses: Array.from(allDeliveryAddresses),
-      warehouseManifest
+      warehouseManifest,
+      warehouseBatchResults,
+      maxFlowToFirstCustomer,
     });
   };
 
@@ -160,7 +183,7 @@ export default function CheckoutPage() {
     setCombinedResult(null);
   };
   
-  const mapPath = combinedResult?.tspResult?.path || [];
+  const mapPath = combinedResult?.consolidatedTspResult?.path || [];
 
   const mapHighlights = useMemo(() => {
     if (combinedResult) {
@@ -203,7 +226,7 @@ export default function CheckoutPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Simulation Map</CardTitle>
-                    <CardDescription>Visual representation of the depot (purple), warehouses (blue), delivery locations (yellow), and the consolidated truck route.</CardDescription>
+                    <CardDescription>Visual representation of the depot (purple), warehouses (blue), delivery locations (yellow), and the consolidated truck route (Strategy 2).</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <DummyMap nodes={allNodes} edges={allEdges} highlightedPath={mapPath} highlightedNodes={mapHighlights} />
@@ -212,7 +235,7 @@ export default function CheckoutPage() {
             {combinedResult && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>Optimization Results: A Tale of Two Strategies</CardTitle>
+                        <CardTitle>Optimization Results: A Tale of Three Strategies</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6 text-sm">
 
@@ -224,7 +247,7 @@ export default function CheckoutPage() {
                              {combinedResult.allOrderShipments.length > 0 ? (
                                 combinedResult.allOrderShipments.map((order, orderIndex) => (
                                      <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
-                                        <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.orderId}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
+                                        <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.id}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
                                         {order.shipments.map((shipment, index) => (
                                             <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
                                                 <p className="font-medium text-primary">Shipment {index + 1} from {shipment.warehouseName}</p>
@@ -248,7 +271,7 @@ export default function CheckoutPage() {
                             )}
                         </div>
                         
-                        <div className="p-4 bg-muted/50 rounded-lg">
+                        <div className="p-4 bg-muted/50 rounded-lg border">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Strategy 2: Prioritize Efficiency (The Local Delivery Model)</h4>
                             <p className="text-xs text-muted-foreground mb-3">This model's goal is to use as few trucks as possible. A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything for everyone, delivers to all customers on an optimized route, and finally returns to the depot.
                             </p>
@@ -275,15 +298,44 @@ export default function CheckoutPage() {
                             
                             <Separator className="my-4"/>
 
-                            {combinedResult.tspResult ? (
+                            {combinedResult.consolidatedTspResult ? (
                                 <div className="space-y-2">
-                                    <p><strong>Total Consolidated Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
-                                    <p><strong>Optimized Route for One Truck:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                    <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.distance.toFixed(2)} km</p>
+                                    <p><strong>Optimized Route for One Truck:</strong> <span className="font-code">{combinedResult.consolidatedTspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                                 </div>
                             ) : <p>Not enough stops for a TSP route.</p>}
                         </div>
 
-                         <div className="p-4 bg-muted/50 rounded-lg">
+                         <div className="p-4 bg-green-50/50 rounded-lg border border-green-200">
+                            <h4 className="font-bold mb-2 flex items-center gap-2 text-green-800"><Package size={16}/> Strategy 3: Hybrid Batching by Warehouse</h4>
+                            <p className="text-xs text-muted-foreground mb-3">
+                                This hybrid model dispatches a separate truck from each required warehouse. Each truck picks up all items from its home base and runs an optimized mini-route to deliver only to its assigned customers before returning.
+                            </p>
+                            {combinedResult.warehouseBatchResults.map((batch, index) => (
+                                <div key={index} className="p-3 bg-white rounded-md border mb-3">
+                                    <p className="font-bold text-primary flex items-center gap-2 mb-2"><Warehouse size={14}/> Batch from <span className="text-green-800">{batch.warehouseName}</span></p>
+                                     <div className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-green-300">
+                                         <h5 className="font-semibold">Pickup Manifest:</h5>
+                                         <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                            {batch.items.map((item, itemIndex) => (
+                                                <li key={itemIndex}>
+                                                    <span className="font-semibold">{item.productName}</span> for <span className="font-semibold text-primary/80">{item.orderId}</span> (to {nodeMap.get(item.customerAddress)?.name})
+                                                </li>
+                                            ))}
+                                        </ul>
+                                        {batch.route ? (
+                                             <div className="pt-2">
+                                                <p><strong>Mini-Route Distance:</strong> {batch.route.distance.toFixed(2)} km</p>
+                                                <p><strong>Mini-Route Path:</strong> <span className="font-code text-xs">{batch.route.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                            </div>
+                                        ) : <p className="text-destructive-foreground">Not enough stops for a route.</p>}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+
+                         <div className="p-4 bg-muted/50 rounded-lg border">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
                             <p className="text-xs text-muted-foreground mb-4">This is a separate, theoretical calculation for network planning, focusing only on the roads connected to your main order. It helps find bottlenecks.</p>
                             <div >
@@ -304,9 +356,5 @@ export default function CheckoutPage() {
     </div>
   );
 }
-
-    
-
-    
 
     
