@@ -8,12 +8,17 @@ export interface Node {
 export interface Edge {
   source: string;
   target: string;
-  weight: number;
-  capacity: number;
+  weight: number; // distance
+  capacity: number; // packages per unit time
 }
 
 const locations: Omit<Node, 'name'>[] = [
-  { id: 'warehouse', x: 50, y: 175 },
+  // Warehouses
+  { id: 'warehouse-a', x: 50, y: 175 },
+  { id: 'warehouse-b', x: 280, y: 40 },
+  { id: 'warehouse-c', x: 450, y: 250 },
+  
+  // Locations
   { id: 'loc1', x: 120, y: 50 },
   { id: 'loc2', x: 100, y: 150 },
   { id: 'loc3', x: 130, y: 250 },
@@ -36,13 +41,20 @@ const locations: Omit<Node, 'name'>[] = [
   { id: 'loc20', x: 190, y: 220 },
 ];
 
-export const nodes: Node[] = locations.map(loc => ({
-  ...loc,
-  name: loc.id === 'warehouse' ? 'Warehouse' : `Loc ${loc.id.replace('loc', '')}`
-}));
+export const nodes: Node[] = locations.map(loc => {
+  if (loc.id === 'warehouse-a') return { ...loc, name: 'Warehouse A' };
+  if (loc.id === 'warehouse-b') return { ...loc, name: 'Warehouse B' };
+  if (loc.id === 'warehouse-c') return { ...loc, name: 'Warehouse C' };
+  return { ...loc, name: `Loc ${loc.id.replace('loc', '')}` };
+});
 
 const connections: [string, string][] = [
-  ['warehouse', 'loc2'], ['warehouse', 'loc3'],
+  // Connections from warehouses
+  ['warehouse-a', 'loc2'], ['warehouse-a', 'loc3'],
+  ['warehouse-b', 'loc5'], ['warehouse-b', 'loc8'], ['warehouse-b', 'loc9'], ['warehouse-b', 'loc12'],
+  ['warehouse-c', 'loc14'], ['warehouse-c', 'loc17'], ['warehouse-c', 'loc18'],
+
+  // Connections between locations
   ['loc1', 'loc2'], ['loc1', 'loc5'], ['loc1', 'loc8'],
   ['loc2', 'loc3'], ['loc2', 'loc6'],
   ['loc3', 'loc4'], ['loc3', 'loc7'],
@@ -58,7 +70,7 @@ const connections: [string, string][] = [
   ['loc13', 'loc16'], ['loc13', 'loc17'],
   ['loc14', 'loc17'], ['loc14', 'loc18'],
   ['loc15', 'loc16'],
-  ['loc16', 'loc19'],
+  ['loc16', 'loc19'], ['loc16', 'warehouse-c'],
   ['loc17', 'loc18'], ['loc17', 'loc19'],
   ['loc18', 'loc19'],
   ['loc20', 'loc10'], ['loc20', 'loc13']

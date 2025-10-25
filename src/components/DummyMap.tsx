@@ -6,9 +6,10 @@ interface DummyMapProps {
   nodes: Node[];
   edges: Edge[];
   highlightedPath?: string[];
+  highlightedNodes?: string[];
 }
 
-export default function DummyMap({ nodes, edges, highlightedPath = [] }: DummyMapProps) {
+export default function DummyMap({ nodes, edges, highlightedPath = [], highlightedNodes = [] }: DummyMapProps) {
   const pathEdges = new Set<string>();
   if (highlightedPath.length > 1) {
     for (let i = 0; i < highlightedPath.length - 1; i++) {
@@ -71,14 +72,16 @@ export default function DummyMap({ nodes, edges, highlightedPath = [] }: DummyMa
 
         {/* All Nodes */}
         {nodes.map((node) => {
-          const isWarehouse = node.id === 'warehouse';
+          const isWarehouse = node.id.includes('warehouse');
           const onPath = highlightedPath.includes(node.id);
+          const isHighlighted = highlightedNodes.includes(node.id);
+          
           return (
             <g key={node.id} transform={`translate(${node.x}, ${node.y})`}>
               <circle
                 r={isWarehouse ? 8 : 6}
-                className={`${isWarehouse ? 'fill-primary' : 'fill-card'} stroke-primary`}
-                strokeWidth={onPath ? 2 : 1}
+                className={`${isWarehouse ? 'fill-primary' : (isHighlighted ? 'fill-accent' : 'fill-card')} ${isHighlighted ? 'stroke-primary' : 'stroke-muted-foreground'}`}
+                strokeWidth={onPath || isHighlighted ? 2 : 1}
               />
               <text
                 dy={isWarehouse ? -12 : -10}
@@ -87,13 +90,15 @@ export default function DummyMap({ nodes, edges, highlightedPath = [] }: DummyMa
               >
                 {node.name}
               </text>
-              <text
-                dy={isWarehouse ? 20 : 16}
-                textAnchor="middle"
-                className="text-[7px] font-code fill-muted-foreground"
-              >
-                ({node.x}, {node.y})
-              </text>
+              {!isWarehouse && (
+                 <text
+                    dy={16}
+                    textAnchor="middle"
+                    className="text-[7px] font-code fill-muted-foreground"
+                >
+                    ({node.x}, {node.y})
+                </text>
+              )}
             </g>
           );
         })}
