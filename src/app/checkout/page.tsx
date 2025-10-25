@@ -15,7 +15,7 @@ import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, Warehouse } from 'lucide-react';
+import { Route, Truck, Zap, Combine, Warehouse, Info } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import type { Product } from '@/lib/products';
 import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
@@ -29,13 +29,12 @@ type CombinedResult = {
   shortestPathToFirstCustomer: DijkstraResult;
   maxFlowToFirstCustomer: MaxFlowResult;
   requiredWarehouses: string[];
-  allStops: string[];
+  deliveryAddresses: string[];
 };
 
 export default function CheckoutPage() {
   const { items: mainUserCart, clearCart: clearMainUserCart } = useCart();
   
-  // The main user's order is now just the first in a list of orders.
   const [mainUserOrder, setMainUserOrder] = useState<SimulatedOrder>({
     id: 'you',
     address: 'loc10',
@@ -68,8 +67,7 @@ export default function CheckoutPage() {
     const allDeliveryAddresses = new Set<string>(allSimulatedOrders.filter(o => o.items.length > 0).map(o => o.address));
     
     // 1. TSP from a central depot to all required warehouses then to all customers.
-    const tspStops = [...allRequiredWarehouses, ...allDeliveryAddresses];
-    const tspResult = solveTsp(allNodes, allEdges, 'warehouse-a', tspStops);
+    const tspResult = solveTsp(allNodes, allEdges, 'warehouse-a', Array.from(allRequiredWarehouses), Array.from(allDeliveryAddresses));
 
     // 2. Simple shortest path for *your* delivery from the nearest warehouse.
     let nearestWarehouse = '';
@@ -96,12 +94,12 @@ export default function CheckoutPage() {
       shortestPathToFirstCustomer,
       maxFlowToFirstCustomer,
       requiredWarehouses: Array.from(allRequiredWarehouses),
-      allStops: tspStops
+      deliveryAddresses: Array.from(allDeliveryAddresses),
     });
   };
 
   const resetSimulation = () => {
-    clearMainUserCart(); // Clears the main user's cart via CartContext
+    clearMainUserCart();
     setOtherOrders([]);
     setCombinedResult(null);
   };
@@ -112,13 +110,13 @@ export default function CheckoutPage() {
     if (combinedResult) {
       const nodes = new Set([
         ...combinedResult.requiredWarehouses,
-        ...allSimulatedOrders.map(o => o.address),
+        ...combinedResult.deliveryAddresses,
         'warehouse-a'
       ]);
       return Array.from(nodes);
     }
     return [];
-  }, [combinedResult, allSimulatedOrders]);
+  }, [combinedResult]);
 
   return (
     <div className="space-y-8">
@@ -151,7 +149,7 @@ export default function CheckoutPage() {
             <Card>
                 <CardHeader>
                     <CardTitle>Simulation Map</CardTitle>
-                    <CardDescription>Visual representation of warehouses, delivery locations, and the optimized route.</CardDescription>
+                    <CardDescription>Visual representation of warehouses (blue), delivery locations (yellow), and the optimized route.</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <DummyMap nodes={allNodes} edges={allEdges} highlightedPath={mapPath} highlightedNodes={mapHighlights} />
@@ -160,42 +158,51 @@ export default function CheckoutPage() {
             {combinedResult && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>Optimization Results</CardTitle>
+                        <CardTitle>Optimization Results Breakdown</CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-4 text-sm">
-                        <p><strong className="flex items-center gap-2"><Warehouse size={16}/> Warehouses to Visit:</strong> The truck must visit <span className="font-code">{combinedResult.requiredWarehouses.map(id => nodeMap.get(id)?.name).join(', ') || 'None'}</span> to pick up all items for this batch.</p>
-                        <Separator />
+                    <CardContent className="space-y-6 text-sm">
                         
                         <div className="p-4 bg-muted/50 rounded-lg">
                             <h4 className="font-bold mb-2 flex items-center gap-2"><Truck size={16}/> Batched Delivery Route (TSP)</h4>
+                            <p className="text-xs text-muted-foreground mb-2">A single truck serves all orders. It starts at the central depot (Depot A), visits the necessary warehouses to collect all items, delivers to all customers, then returns to the depot.</p>
+                            
+                            <p className="mb-2"><strong className="flex items-center gap-2"><Warehouse size={16}/> Warehouses to Visit:</strong> The truck must visit <span className="font-code">{combinedResult.requiredWarehouses.map(id => nodeMap.get(id)?.name).join(', ') || 'None'}</span> because they contain items for this batch of orders.</p>
+                            
                             {combinedResult.tspResult ? (
                                 <>
-                                    <p>A single truck serves all orders. It starts at Depot A, visits required warehouses, delivers to all customers, then returns.</p>
                                     <p><strong>Total Distance:</strong> {combinedResult.tspResult.distance.toFixed(2)} km</p>
                                     <p><strong>Optimized Route:</strong> <span className="font-code">{combinedResult.tspResult.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
                                 </>
                             ) : <p>Not enough stops for a TSP route.</p>}
                         </div>
 
-                        <div className="p-4 bg-muted/50 rounded-lg">
-                            <h4 className="font-bold mb-2 flex items-center gap-2"><Route size={16}/> Your Priority Path (Dijkstra)</h4>
-                            {combinedResult.shortestPathToFirstCustomer ? (
-                                <>
-                                    <p>For comparison, if we only shipped your order priority, the fastest path from the nearest warehouse would be:</p>
-                                    <p><strong>Distance:</strong> {combinedResult.shortestPathToFirstCustomer.distance.toFixed(2)} km</p>
-                                    <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPathToFirstCustomer.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
-                                </>
-                            ) : <p>Your cart is empty. No direct path to calculate.</p>}
-                        </div>
+                         <div className="p-4 bg-muted/50 rounded-lg">
+                            <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Analyses (For Your Order Only)</h4>
+                            <p className="text-xs text-muted-foreground mb-4">These are separate calculations for comparison, focusing only on your order, not the entire batch.</p>
+                            <div className="space-y-4">
+                                <div >
+                                    <h5 className="font-semibold flex items-center gap-2"><Route size={16}/> Your Priority Path (Dijkstra)</h5>
+                                    {combinedResult.shortestPathToFirstCustomer ? (
+                                        <>
+                                            <p>For comparison, if we only shipped your order, the fastest path from the nearest warehouse would be:</p>
+                                            <p><strong>Distance:</strong> {combinedResult.shortestPathToFirstCustomer.distance.toFixed(2)} km</p>
+                                            <p><strong>Path:</strong> <span className="font-code">{combinedResult.shortestPathToFirstCustomer.path.map(id => nodeMap.get(id)?.name).join(' -> ')}</span></p>
+                                        </>
+                                    ) : <p>Your cart is empty. No direct path to calculate.</p>}
+                                </div>
 
-                        <div className="p-4 bg-muted/50 rounded-lg">
-                            <h4 className="font-bold mb-2 flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h4>
-                            {combinedResult.maxFlowToFirstCustomer !== null ? (
-                                <>
-                                    <p>The theoretical maximum number of packages that can be moved from the nearest warehouse to your location.</p>
-                                    <p><strong>Max Packages:</strong> {combinedResult.maxFlowToFirstCustomer} units</p>
-                                </>
-                            ) : <p>Your cart is empty. No capacity to calculate.</p>}
+                                <Separator />
+
+                                <div >
+                                    <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
+                                    {combinedResult.maxFlowToFirstCustomer !== null ? (
+                                        <>
+                                            <p>This is a theoretical analysis of the road network itself. It shows the maximum number of packages that could possibly be moved between the closest warehouse and your address per hour, assuming all roads are used optimally. It helps identify potential network bottlenecks.</p>
+                                            <p><strong>Max Capacity:</strong> {combinedResult.maxFlowToFirstCustomer} packages/hour</p>
+                                        </>
+                                    ) : <p>Your cart is empty. No capacity to calculate.</p>}
+                                </div>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>

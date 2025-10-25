@@ -1,86 +1,123 @@
 import type { Node, Edge } from '../graph';
 
-export function solveTsp(nodes: Node[], edges: Edge[], startId: string, destinations: string[]) {
-  if (destinations.length === 0) {
-    return { path: [startId], distance: 0 };
+// Helper for Dijkstra's algorithm to find shortest paths between any two nodes
+function findShortestPath(fromNodeId: string, toNodeId: string, nodes: Node[], adj: { [key: string]: { [key: string]: number } }) {
+  const distances: { [key: string]: number } = {};
+  const prev: { [key: string]: string | null } = {};
+  const pq: { [key: string]: number } = {};
+
+  nodes.forEach(n => {
+    distances[n.id] = Infinity;
+    prev[n.id] = null;
+    pq[n.id] = Infinity;
+  });
+
+  distances[fromNodeId] = 0;
+  pq[fromNodeId] = 0;
+
+  while(Object.keys(pq).length > 0) {
+    const u = Object.keys(pq).reduce((a, b) => pq[a] < pq[b] ? a : b);
+    delete pq[u];
+
+    if (u === toNodeId) break;
+
+    Object.keys(adj[u] || {}).forEach(v => {
+      const alt = distances[u] + adj[u][v];
+      if (alt < distances[v]) {
+        distances[v] = alt;
+        prev[v] = u;
+        pq[v] = alt;
+      }
+    });
+  }
+
+  return distances[toNodeId];
+}
+
+
+// Heuristic solver for a TSP-like problem with separate pickup and delivery phases.
+export function solveTsp(nodes: Node[], edges: Edge[], startDepot: string, warehousesToVisit: string[], deliveryAddresses: string[]) {
+  if (warehousesToVisit.length === 0 && deliveryAddresses.length === 0) {
+    return { path: [startDepot], distance: 0 };
   }
   
   const adj: { [key: string]: { [key: string]: number } } = {};
-   nodes.forEach(node => adj[node.id] = {});
-   edges.forEach(edge => {
-     adj[edge.source][edge.target] = edge.weight;
-     adj[edge.target][edge.source] = edge.weight;
-   });
+  nodes.forEach(node => adj[node.id] = {});
+  edges.forEach(edge => {
+    adj[edge.source][edge.target] = edge.weight;
+    adj[edge.target][edge.source] = edge.weight;
+  });
 
-  // Create a complete graph with shortest path distances for TSP nodes
-  const tspNodes = [startId, ...new Set(destinations)];
+  // Create a complete distance matrix for all relevant nodes (depot, warehouses, customers)
+  const relevantNodes = [startDepot, ...warehousesToVisit, ...deliveryAddresses];
   const distMatrix: { [key: string]: { [key: string]: number } } = {};
 
-  for (const fromNode of tspNodes) {
+  for (const fromNode of relevantNodes) {
     distMatrix[fromNode] = {};
-    for (const toNode of tspNodes) {
-      if (fromNode === toNode) {
-        distMatrix[fromNode][toNode] = 0;
-      } else {
-        // Simple Dijkstra for all-pairs shortest paths on the main graph
-        const distances: { [key: string]: number } = {};
-        const pq: { [key: string]: number } = {};
-        nodes.forEach(n => {
-          distances[n.id] = Infinity;
-          pq[n.id] = Infinity;
-        });
-        distances[fromNode] = 0;
-        pq[fromNode] = 0;
-        while(Object.keys(pq).length > 0) {
-          const u = Object.keys(pq).reduce((a, b) => pq[a] < pq[b] ? a : b);
-          delete pq[u];
-          if(u === toNode) break;
-
-          Object.keys(adj[u] || {}).forEach(v => {
-            const alt = distances[u] + adj[u][v];
-            if(alt < distances[v]) {
-              distances[v] = alt;
-              pq[v] = alt;
-            }
-          });
+    for (const toNode of relevantNodes) {
+        if (fromNode === toNode) {
+            distMatrix[fromNode][toNode] = 0;
+        } else {
+            distMatrix[fromNode][toNode] = findShortestPath(fromNode, toNode, nodes, adj);
         }
-        distMatrix[fromNode][toNode] = distances[toNode];
-      }
     }
   }
   
-  // Nearest neighbor heuristic
-  let unvisited = new Set(destinations);
-  let current = startId;
-  const path = [startId];
+  const finalPath = [startDepot];
   let totalDistance = 0;
+  let currentLoc = startDepot;
 
-  while (unvisited.size > 0) {
+  // Phase 1: Pickups from warehouses
+  let unvisitedWarehouses = new Set(warehousesToVisit);
+  while (unvisitedWarehouses.size > 0) {
     let nearest: string | null = null;
     let minDistance = Infinity;
 
-    unvisited.forEach(node => {
-      const distance = distMatrix[current][node];
+    unvisitedWarehouses.forEach(wh => {
+      const distance = distMatrix[currentLoc][wh];
       if (distance < minDistance) {
         minDistance = distance;
-        nearest = node;
+        nearest = wh;
       }
     });
-
+    
     if (nearest) {
       totalDistance += minDistance;
-      current = nearest;
-      path.push(current);
-      unvisited.delete(current);
+      currentLoc = nearest;
+      finalPath.push(currentLoc);
+      unvisitedWarehouses.delete(currentLoc);
     } else {
-      // Should not happen in a connected graph
-      break;
+      break; // Should not happen
     }
   }
 
-  // Return to warehouse
-  totalDistance += distMatrix[current][startId];
-  path.push(startId);
+  // Phase 2: Deliveries to customers
+  let unvisitedCustomers = new Set(deliveryAddresses);
+  while (unvisitedCustomers.size > 0) {
+    let nearest: string | null = null;
+    let minDistance = Infinity;
 
-  return { path, distance: totalDistance };
+    unvisitedCustomers.forEach(cust => {
+      const distance = distMatrix[currentLoc][cust];
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearest = cust;
+      }
+    });
+    
+    if (nearest) {
+      totalDistance += minDistance;
+      currentLoc = nearest;
+      finalPath.push(currentLoc);
+      unvisitedCustomers.delete(currentLoc);
+    } else {
+      break; // Should not happen
+    }
+  }
+  
+  // Phase 3: Return to depot
+  totalDistance += distMatrix[currentLoc][startDepot];
+  finalPath.push(startDepot);
+
+  return { path: finalPath, distance: totalDistance };
 }
