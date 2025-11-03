@@ -32,16 +32,15 @@ const ForecastDemandInputSchema = z.object({
 });
 
 // Output schema for a single stock rebalancing suggestion
-export const StockRebalanceSchema = z.object({
+const StockRebalanceSchema = z.object({
   productName: z.string().describe('The name of the product to be moved.'),
   fromWarehouseId: z.string().describe('The ID of the warehouse to move stock from.'),
   toWarehouseId: z.string().describe('The ID of the warehouse to move stock to.'),
   reason: z.string().describe('A brief explanation for why this stock movement is recommended.'),
 });
-export type StockRebalance = z.infer<typeof StockRebalanceSchema>;
 
 // The main function to call for demand forecasting
-export async function forecastDemand(input: z.infer<typeof ForecastDemandInputSchema>): Promise<StockRebalance[]> {
+export async function forecastDemand(input: z.infer<typeof ForecastDemandInputSchema>): Promise<z.infer<typeof StockRebalanceSchema>[]> {
   return await forecastDemandFlow(input);
 }
 
@@ -96,15 +95,14 @@ const PredictDeliveryTimesInputSchema = z.object({
 });
 
 // Output schema for a single delivery time prediction
-export const DeliveryPredictionSchema = z.object({
+const DeliveryPredictionSchema = z.object({
   strategyId: z.string(),
   predictedTime: z.number().describe('The AI-predicted delivery time in hours, considering all factors.'),
   simpleTime: z.number().describe('A simple time calculation based only on distance (distance / 50 kph).'),
 });
-export type DeliveryPrediction = z.infer<typeof DeliveryPredictionSchema>;
 
 // The main function to call for delivery time prediction
-export async function predictDeliveryTimes(input: z.infer<typeof PredictDeliveryTimesInputSchema>): Promise<DeliveryPrediction[]> {
+export async function predictDeliveryTimes(input: z.infer<typeof PredictDeliveryTimesInputSchema>): Promise<z.infer<typeof DeliveryPredictionSchema>[]> {
   return await predictDeliveryTimesFlow(input);
 }
 

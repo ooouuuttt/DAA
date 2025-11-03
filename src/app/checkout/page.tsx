@@ -22,9 +22,28 @@ import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { forecastDemand, predictDeliveryTimes, type DeliveryPrediction, type StockRebalance } from '@/ai/flows/logistics-flow';
+import { forecastDemand, predictDeliveryTimes } from '@/ai/flows/logistics-flow';
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { z } from 'zod';
+
+
+// AI-related schemas, moved from the flow file
+export const StockRebalanceSchema = z.object({
+  productName: z.string().describe('The name of the product to be moved.'),
+  fromWarehouseId: z.string().describe('The ID of the warehouse to move stock from.'),
+  toWarehouseId: z.string().describe('The ID of the warehouse to move stock to.'),
+  reason: z.string().describe('A brief explanation for why this stock movement is recommended.'),
+});
+export type StockRebalance = z.infer<typeof StockRebalanceSchema>;
+
+export const DeliveryPredictionSchema = z.object({
+  strategyId: z.string(),
+  predictedTime: z.number().describe('The AI-predicted delivery time in hours, considering all factors.'),
+  simpleTime: z.number().describe('A simple time calculation based only on distance (distance / 50 kph).'),
+});
+export type DeliveryPrediction = z.infer<typeof DeliveryPredictionSchema>;
+
 
 const COST_PER_KM = 1.5; // $1.50 per kilometer
 const COST_PER_TRUCK = 50; // $50 fixed cost per truck dispatched
@@ -293,7 +312,7 @@ export default function CheckoutPage() {
             customerLocationId: o.address,
             products: o.items.map(i => ({ productId: i.id, name: i.name }))
         }));
-        const warehouseInfo = nodes.filter(n => n.id.startsWith('warehouse')).map(w => ({
+        const warehouseInfo = allNodes.filter(n => n.id.startsWith('warehouse')).map(w => ({
             warehouseId: w.id,
             name: w.name
         }));
