@@ -504,12 +504,12 @@ export default function CheckoutPage() {
         {path.map((id, index) => {
             const name = nodeMap.get(id)?.name || id;
             const isCustomer = customerLocations.includes(id);
-            const isWaypoint = !nodeMap.get(id)?.id.includes('loc') && !isCustomer;
+            const isWarehouse = id.startsWith('warehouse');
 
             let nameEl;
             if (isCustomer) {
                 nameEl = <span className="text-green-600 font-bold">{name}</span>;
-            } else if (isWaypoint) {
+            } else if (isWarehouse) {
                 nameEl = <span className="font-medium">{name}</span>;
             } else {
                 nameEl = <span className="text-muted-foreground">{name}</span>;
