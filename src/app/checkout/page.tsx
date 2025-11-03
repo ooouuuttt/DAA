@@ -15,12 +15,16 @@ import { dijkstra } from '@/lib/algorithms/dijkstra';
 import { solveTsp } from '@/lib/algorithms/tsp';
 import { edmondsKarp } from '@/lib/algorithms/max-flow';
 import { useCart } from '@/context/CartContext';
-import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split, User, Eye, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Route, Truck, Zap, Combine, Warehouse, Info, Package, Split, User, Eye, RefreshCw, AlertTriangle, BrainCircuit } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import type { Product } from '@/lib/products';
 import { OrderCreator, type SimulatedOrder } from '@/components/OrderCreator';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { forecastDemand, predictDeliveryTimes, type DeliveryPrediction, type StockRebalance } from '@/ai/flows/logistics-flow';
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const COST_PER_KM = 1.5; // $1.50 per kilometer
 const COST_PER_TRUCK = 50; // $50 fixed cost per truck dispatched
@@ -91,9 +95,15 @@ export default function CheckoutPage() {
 
   const [otherOrders, setOtherOrders] = useState<SimulatedOrder[]>([]);
   const [combinedResult, setCombinedResult] = useState<CombinedResult | null>(null);
-  const [activeMap, setActiveMap] = useState<string>('strategy-2');
+  const [activeMap, setActiveMap] = useState<{ id: string } | null>(null);
   const [currentEdges, setCurrentEdges] = useState(initialEdges);
   const [isTrafficSimulated, setIsTrafficSimulated] = useState(false);
+
+  const [stockRebalance, setStockRebalance] = useState<StockRebalance[] | null>(null);
+  const [deliveryPredictions, setDeliveryPredictions] = useState<DeliveryPrediction[] | null>(null);
+  const [isForecasting, setIsForecasting] = useState(false);
+  const [isPredicting, setIsPredicting] = useState(false);
+
 
   // Update main user's order when their cart changes
   useEffect(() => {
@@ -247,8 +257,13 @@ export default function CheckoutPage() {
       totalCostStrategy3,
       maxFlowToFirstCustomer,
     });
-    if (!activeMap) {
-        setActiveMap('strategy-2');
+    // Default map view
+    if (consolidatedTspResult?.route) {
+        setActiveMap({ id: 'strategy-2' });
+    } else if (warehouseBatchResults[0]?.routes[0]?.route) {
+        const batch = warehouseBatchResults[0];
+        const truckRoute = batch.routes[0];
+        setActiveMap({id: `strategy-3-${batch.warehouseId}-${truckRoute.truck}`})
     }
   };
   
@@ -265,14 +280,80 @@ export default function CheckoutPage() {
     setOtherOrders([]);
     setCombinedResult(null);
     resetTraffic();
+    setStockRebalance(null);
+    setDeliveryPredictions(null);
   };
   
-  const { mapPath, mapHighlights } = useMemo(() => {
-    if (!combinedResult) return { mapPath: [], mapHighlights: [] };
+  const handleForecastDemand = async () => {
+    setIsForecasting(true);
+    setStockRebalance(null);
+    try {
+        const ordersForAI = allSimulatedOrders.map(o => ({
+            orderId: o.id,
+            customerLocationId: o.address,
+            products: o.items.map(i => ({ productId: i.id, name: i.name }))
+        }));
+        const warehouseInfo = nodes.filter(n => n.id.startsWith('warehouse')).map(w => ({
+            warehouseId: w.id,
+            name: w.name
+        }));
+        const result = await forecastDemand({ orders: ordersForAI, warehouses: warehouseInfo });
+        setStockRebalance(result);
+    } catch (e) {
+        console.error("Error forecasting demand:", e);
+    } finally {
+        setIsForecasting(false);
+    }
+  };
 
-    if (activeMap === 'strategy-2' && combinedResult.consolidatedTspResult?.route) {
+  const handlePredictDeliveryTimes = async () => {
+      if (!combinedResult) return;
+      setIsPredicting(true);
+      setDeliveryPredictions(null);
+      try {
+          const predictionInputs = [];
+          
+          if (combinedResult.consolidatedTspResult?.route) {
+              predictionInputs.push({
+                  strategyId: 'Strategy 2',
+                  distance: combinedResult.consolidatedTspResult.route.distance,
+                  stops: combinedResult.deliveryAddressesForTsp.length,
+                  trafficScore: isTrafficSimulated ? Math.random() * 50 + 50 : Math.random() * 50,
+              });
+          }
+
+          combinedResult.warehouseBatchResults.forEach(batch => {
+              batch.routes.forEach(truckRoute => {
+                  if (truckRoute.route) {
+                      predictionInputs.push({
+                          strategyId: `Strategy 3: ${batch.warehouseName} Truck ${truckRoute.truck}`,
+                          distance: truckRoute.route.distance,
+                          stops: truckRoute.customers.length,
+                          trafficScore: isTrafficSimulated ? Math.random() * 50 + 50 : Math.random() * 50,
+                      });
+                  }
+              });
+          });
+          
+          const result = await predictDeliveryTimes({ routes: predictionInputs });
+          setDeliveryPredictions(result);
+
+      } catch (e) {
+          console.error("Error predicting delivery times:", e);
+      } finally {
+          setIsPredicting(false);
+      }
+  };
+
+
+  const { mapPath, mapHighlights } = useMemo(() => {
+    if (!combinedResult || !activeMap) return { mapPath: [], mapHighlights: [] };
+
+    const { id } = activeMap;
+    
+    if (id === 'strategy-2' && combinedResult.consolidatedTspResult?.route) {
         const depot = { id: 'warehouse-a', type: 'depot' as const };
-        const warehouses = combinedResult.requiredWarehousesForTsp.map(id => ({ id, type: 'warehouse' as const }));
+        const warehouses = combinedResult.requiredWarehousesForTsp.map(wId => ({ id: wId, type: 'warehouse' as const }));
         const customers = combinedResult.deliveryAddressesForTsp.map(c => ({ id: c.address, type: 'customer' as const }));
         return {
             mapPath: combinedResult.consolidatedTspResult.route.path || [],
@@ -280,16 +361,16 @@ export default function CheckoutPage() {
         };
     }
 
-    if (activeMap.startsWith('strategy-3-')) {
-        const [_, warehouseId, truckNum] = activeMap.split('-');
+    if (id.startsWith('strategy-3-')) {
+        const [_, __, warehouseId, truckNum] = id.split('-');
         const batch = combinedResult.warehouseBatchResults.find(b => b.warehouseId === warehouseId);
         const truckRoute = batch?.routes.find(r => r.truck === parseInt(truckNum));
         
-        if (truckRoute) {
+        if (truckRoute && truckRoute.route) {
             const warehouse = { id: batch.warehouseId, type: 'warehouse' as const };
-            const customers = truckRoute.customers.map(id => ({ id, type: 'customer' as const }));
+            const customers = truckRoute.customers.map(cId => ({ id: cId, type: 'customer' as const }));
             return {
-                mapPath: truckRoute.route?.path || [],
+                mapPath: truckRoute.route.path,
                 mapHighlights: [warehouse, ...customers]
             };
         }
@@ -322,12 +403,21 @@ export default function CheckoutPage() {
     );
   };
 
+  const deliveryPredictionChartData = useMemo(() => {
+    if (!deliveryPredictions) return [];
+    return deliveryPredictions.map(p => ({
+      name: p.strategyId,
+      'Predicted Time (AI)': p.predictedTime,
+      'Simple Time (Distance-based)': p.simpleTime,
+    }));
+  }, [deliveryPredictions]);
+
   return (
     <div className="space-y-8">
        <div>
         <h1 className="text-4xl font-bold font-headline">Logistics Control Panel</h1>
         <p className="mt-2 text-lg text-muted-foreground">
-          Simulate and compare real-world delivery backend strategies with dynamic costs and constraints.
+          Simulate delivery strategies and generate AI-powered predictive insights.
         </p>
       </div>
 
@@ -366,171 +456,252 @@ export default function CheckoutPage() {
                 </CardContent>
             </Card>
             {combinedResult && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Optimization Results: A Tale of Three Strategies</CardTitle>
-                        <CardDescription>Costs are based on ${COST_PER_KM.toFixed(2)}/km and a ${COST_PER_TRUCK.toFixed(2)} fixed cost per truck.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-6 text-sm">
-                        <RadioGroup value={activeMap} onValueChange={setActiveMap} className="gap-6">
-                            <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200">
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Prioritize Speed (The Amazon Model)</h4>
-                                        <p className="text-xs text-muted-foreground mb-3 pr-4">
-                                            Each customer's order is split into multiple shipments to get items to them as fast as possible. This is expensive but offers maximum speed.
-                                        </p>
-                                    </div>
-                                    <div className="text-right flex-shrink-0">
-                                        <p className="font-bold text-lg text-blue-900">${combinedResult.totalCostStrategy1.toFixed(2)}</p>
-                                        <p className="text-xs text-muted-foreground">Total Cost</p>
-                                    </div>
-                                </div>
-                                
-                                {combinedResult.allOrderShipments.length > 0 ? (
-                                    combinedResult.allOrderShipments.map((order, orderIndex) => (
-                                        <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
-                                            <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.id}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
-                                            {order.shipments.map((shipment, index) => (
-                                                <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
-                                                    <div className="flex justify-between items-center">
-                                                        <p className="font-medium text-primary">Shipment from {shipment.warehouseName}</p>
-                                                        <p className="font-semibold text-xs">${shipment.cost.toFixed(2)}</p>
-                                                    </div>
-                                                    <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                                        {shipment.items.map((item, itemIndex) => (
-                                                            <li key={itemIndex}>{item.name}</li>
-                                                        ))}
-                                                    </ul>
-                                                    {shipment.path ? (
-                                                        <>
-                                                            <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
-                                                            <p><strong>Direct Path:</strong> {renderPath(shipment.path.path, [order.address])}</p>
-                                                        </>
-                                                    ) : <p className="text-destructive-foreground">No path found.</p>}
-                                                </div>
+                <Tabs defaultValue="strategies" className="w-full">
+                    <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="strategies">Strategies Comparison</TabsTrigger>
+                        <TabsTrigger value="ai">
+                            <BrainCircuit className="mr-2" /> AI Insights
+                        </TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="strategies">
+                      <Card>
+                          <CardHeader>
+                              <CardTitle>Optimization Results: A Tale of Three Strategies</CardTitle>
+                              <CardDescription>Costs are based on ${COST_PER_KM.toFixed(2)}/km and a ${COST_PER_TRUCK.toFixed(2)} fixed cost per truck.</CardDescription>
+                          </CardHeader>
+                          <CardContent className="space-y-6 text-sm">
+                              <RadioGroup value={activeMap?.id} onValueChange={(id) => setActiveMap({ id })} className="gap-6">
+                                  <div className="p-4 bg-blue-50/50 rounded-lg border border-blue-200">
+                                      <div className="flex justify-between items-start">
+                                          <div>
+                                              <h4 className="font-bold mb-2 flex items-center gap-2 text-blue-800"><Split size={16}/> Strategy 1: Prioritize Speed (The Amazon Model)</h4>
+                                              <p className="text-xs text-muted-foreground mb-3 pr-4">
+                                                  Each customer's order is split into multiple shipments to get items to them as fast as possible. This is expensive but offers maximum speed.
+                                              </p>
+                                          </div>
+                                          <div className="text-right flex-shrink-0">
+                                              <p className="font-bold text-lg text-blue-900">${combinedResult.totalCostStrategy1.toFixed(2)}</p>
+                                              <p className="text-xs text-muted-foreground">Total Cost</p>
+                                          </div>
+                                      </div>
+                                      
+                                      {combinedResult.allOrderShipments.length > 0 ? (
+                                          combinedResult.allOrderShipments.map((order, orderIndex) => (
+                                              <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
+                                                  <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.id}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
+                                                  {order.shipments.map((shipment, index) => (
+                                                      <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
+                                                          <div className="flex justify-between items-center">
+                                                              <p className="font-medium text-primary">Shipment from {shipment.warehouseName}</p>
+                                                              <p className="font-semibold text-xs">${shipment.cost.toFixed(2)}</p>
+                                                          </div>
+                                                          <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                              {shipment.items.map((item, itemIndex) => (
+                                                                  <li key={itemIndex}>{item.name}</li>
+                                                              ))}
+                                                          </ul>
+                                                          {shipment.path ? (
+                                                              <>
+                                                                  <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
+                                                                  <p><strong>Direct Path:</strong> {renderPath(shipment.path.path, [order.address])}</p>
+                                                              </>
+                                                          ) : <p className="text-destructive-foreground">No path found.</p>}
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                          ))
+                                      ) : (
+                                          <p className="text-xs text-muted-foreground pl-4">No orders with items to ship.</p>
+                                      )}
+                                  </div>
+                                  
+                                  <div className="p-4 bg-muted/50 rounded-lg border">
+                                      <div className="flex items-center justify-between mb-2">
+                                          <h4 className="font-bold flex items-center gap-2"><Truck size={16}/> Strategy 2: Max Efficiency (The Local Courier)</h4>
+                                          <div className="flex items-center space-x-2">
+                                              <RadioGroupItem value="strategy-2" id="map-strat-2" />
+                                              <Label htmlFor="map-strat-2" className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
+                                          </div>
+                                      </div>
+                                      <div className="flex justify-between items-start">
+                                          <p className="text-xs text-muted-foreground mb-3 pr-4">A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything, delivers to all customers, then returns. Most fuel-efficient, but complex and slow.</p>
+                                          <div className="text-right flex-shrink-0">
+                                              <p className="font-bold text-lg">${combinedResult.consolidatedTspResult?.cost.toFixed(2) ?? '0.00'}</p>
+                                              <p className="text-xs text-muted-foreground">Total Cost</p>
+                                          </div>
+                                      </div>
+                                      
+                                      <div className="space-y-3">
+                                          <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Central Pickup Manifest:</h5>
+                                          {Object.keys(combinedResult.warehouseManifest).length > 0 ? (
+                                              Object.entries(combinedResult.warehouseManifest).map(([whId, items]) => (
+                                                  <div key={whId} className="pl-4 border-l-2 ml-2">
+                                                      <p className="font-medium text-primary">{nodeMap.get(whId)?.name}</p>
+                                                      <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                          {items.map((item, index) => (
+                                                              <li key={index}>
+                                                                  Pick up <span className="font-semibold">{item.productName}</span> for order <span className="font-semibold text-primary/80">{item.orderId}</span>
+                                                              </li>
+                                                          ))}
+                                                      </ul>
+                                                  </div>
+                                              ))
+                                          ) : (
+                                              <p className="text-xs text-muted-foreground pl-4">No warehouses to visit for this batch.</p>
+                                          )}
+                                      </div>
+                                      
+                                      <Separator className="my-4"/>
+
+                                      {combinedResult.consolidatedTspResult?.route ? (
+                                          <div className="space-y-2">
+                                              <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.route.distance.toFixed(2)} km</p>
+                                              <p><strong>Optimized Route for One Truck:</strong> {renderPath(combinedResult.consolidatedTspResult.route.path, combinedResult.deliveryAddressesForTsp.map(c=>c.address))}</p>
+                                          </div>
+                                      ) : <p>Not enough stops for a TSP route.</p>}
+                                  </div>
+
+                                  <div className="p-4 bg-green-50/50 rounded-lg border border-green-200">
+                                      <div className="flex justify-between items-start">
+                                          <div>
+                                              <h4 className="font-bold mb-2 flex items-center gap-2 text-green-800"><Package size={16}/> Strategy 3: Hybrid Batching by Warehouse</h4>
+                                              <p className="text-xs text-muted-foreground mb-3 pr-4">
+                                                  A separate truck is dispatched from each required warehouse. Each truck runs an optimized mini-route for its assigned customers. A great balance of speed and cost.
+                                              </p>
+                                          </div>
+                                          <div className="text-right flex-shrink-0">
+                                              <p className="font-bold text-lg text-green-900">${combinedResult.totalCostStrategy3.toFixed(2)}</p>
+                                              <p className="text-xs text-muted-foreground">Total Cost</p>
+                                          </div>
+                                      </div>
+
+                                      {combinedResult.warehouseBatchResults.map((batch, index) => (
+                                          <div key={index} className="p-3 bg-white rounded-md border mb-3">
+                                              <div className="flex items-start justify-between mb-2">
+                                                  <p className="font-bold text-primary flex items-center gap-2"><Warehouse size={14}/> Batch from <span className="text-green-800">{batch.warehouseName}</span></p>
+                                                  <div className="text-right">
+                                                      <p className="font-semibold text-xs">${batch.totalCost.toFixed(2)}</p>
+                                                      <p className="text-xs text-muted-foreground">{batch.routes.length} truck(s)</p>
+                                                  </div>
+                                              </div>
+                                              {batch.routes.map((truckRoute, truckIndex) => (
+                                              <div key={truckIndex} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-green-300">
+                                                  <div className="flex items-center justify-between mb-2">
+                                                      <p className="font-semibold text-primary/90 flex items-center gap-2"><Truck size={14}/> Truck {truckRoute.truck} Route</p>
+                                                      <div className="flex items-center space-x-2">
+                                                          <RadioGroupItem value={`strategy-3-${batch.warehouseId}-${truckRoute.truck}`} id={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} />
+                                                          <Label htmlFor={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
+                                                      </div>
+                                                  </div>
+                                                  <h5 className="font-semibold">Pickup Manifest:</h5>
+                                                  <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                      {truckRoute.items.map((item, itemIndex) => (
+                                                          <li key={itemIndex}>
+                                                              <span className="font-semibold">{item.productName}</span> for <span className="font-semibold text-primary/80">{item.orderId}</span> (to {nodeMap.get(item.customerAddress)?.name})
+                                                          </li>
+                                                      ))}
+                                                  </ul>
+                                                  {truckRoute.route ? (
+                                                      <div className="pt-2">
+                                                          <p><strong>Route Distance:</strong> {truckRoute.route.distance.toFixed(2)} km</p>
+                                                          <p><strong>Route Path:</strong> {renderPath(truckRoute.route.path, truckRoute.customers)}</p>
+                                                      </div>
+                                                  ) : <p className="text-destructive-foreground">Not enough stops for a route.</p>}
+                                              </div>
+                                              ))}
+                                          </div>
+                                      ))}
+                                  </div>
+                              </RadioGroup>
+
+                              <div className="p-4 bg-muted/50 rounded-lg border">
+                                  <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
+                                  <p className="text-xs text-muted-foreground mb-4">A theoretical calculation for network planning, focusing only on the roads for *your* order. It helps find bottlenecks.</p>
+                                  <div >
+                                      <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
+                                      {combinedResult.maxFlowToFirstCustomer !== null ? (
+                                          <>
+                                              <p>The shows the maximum number of packages that could be moved between the closest warehouse and your address per hour, if all roads were used optimally.</p>
+                                              <p><strong>Max Capacity:</strong> {combinedResult.maxFlowToFirstCustomer} packages/hour</p>
+                                          </>
+                                      ) : <p>Your cart is empty. No capacity to calculate.</p>}
+                                  </div>
+                              </div>
+                          </CardContent>
+                      </Card>
+                    </TabsContent>
+                    <TabsContent value="ai">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2"><BrainCircuit /> AI Predictive Insights</CardTitle>
+                                <CardDescription>Use generative AI to forecast future demand and predict delivery outcomes based on the current simulation state.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-6">
+                                <div className="space-y-4 p-4 border rounded-lg">
+                                    <h3 className="font-semibold">Demand Forecasting & Stock Rebalancing</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                        Analyze the current order batch to predict future product demand in different regions. The AI will recommend moving stock to warehouses closer to predicted demand hotspots to improve future efficiency.
+                                    </p>
+                                    <Button onClick={handleForecastDemand} disabled={isForecasting}>
+                                        {isForecasting ? 'Forecasting...' : 'Generate Demand Forecast'}
+                                    </Button>
+                                    {stockRebalance && (
+                                      <div className="mt-4">
+                                        <h4 className="font-medium mb-2">Recommended Stock Movements:</h4>
+                                        <Table>
+                                          <TableHeader>
+                                            <TableRow>
+                                              <TableHead>Product</TableHead>
+                                              <TableHead>Move From</TableHead>
+                                              <TableHead>Move To</TableHead>
+                                              <TableHead>Reason</TableHead>
+                                            </TableRow>
+                                          </TableHeader>
+                                          <TableBody>
+                                            {stockRebalance.map((item, index) => (
+                                              <TableRow key={index}>
+                                                <TableCell className="font-medium">{item.productName}</TableCell>
+                                                <TableCell>{nodeMap.get(item.fromWarehouseId)?.name}</TableCell>
+                                                <TableCell>{nodeMap.get(item.toWarehouseId)?.name}</TableCell>
+                                                <TableCell className="text-xs">{item.reason}</TableCell>
+                                              </TableRow>
                                             ))}
-                                        </div>
-                                    ))
-                                ) : (
-                                    <p className="text-xs text-muted-foreground pl-4">No orders with items to ship.</p>
-                                )}
-                            </div>
-                            
-                            <div className="p-4 bg-muted/50 rounded-lg border">
-                                <div className="flex items-center justify-between mb-2">
-                                     <h4 className="font-bold flex items-center gap-2"><Truck size={16}/> Strategy 2: Max Efficiency (The Local Courier)</h4>
-                                     <div className="flex items-center space-x-2">
-                                        <RadioGroupItem value="strategy-2" id="map-strat-2" />
-                                        <Label htmlFor="map-strat-2" className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-start">
-                                    <p className="text-xs text-muted-foreground mb-3 pr-4">A single truck serves all orders. It starts at the central depot, visits warehouses to pick up everything, delivers to all customers, then returns. Most fuel-efficient, but complex and slow.</p>
-                                     <div className="text-right flex-shrink-0">
-                                        <p className="font-bold text-lg">${combinedResult.consolidatedTspResult?.cost.toFixed(2) ?? '0.00'}</p>
-                                        <p className="text-xs text-muted-foreground">Total Cost</p>
-                                    </div>
-                                </div>
-                                
-                                <div className="space-y-3">
-                                    <h5 className="font-semibold flex items-center gap-2"><Warehouse size={16}/> Central Pickup Manifest:</h5>
-                                    {Object.keys(combinedResult.warehouseManifest).length > 0 ? (
-                                        Object.entries(combinedResult.warehouseManifest).map(([whId, items]) => (
-                                            <div key={whId} className="pl-4 border-l-2 ml-2">
-                                                <p className="font-medium text-primary">{nodeMap.get(whId)?.name}</p>
-                                                <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                                    {items.map((item, index) => (
-                                                        <li key={index}>
-                                                            Pick up <span className="font-semibold">{item.productName}</span> for order <span className="font-semibold text-primary/80">{item.orderId}</span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <p className="text-xs text-muted-foreground pl-4">No warehouses to visit for this batch.</p>
+                                          </TableBody>
+                                        </Table>
+                                      </div>
                                     )}
                                 </div>
-                                
-                                <Separator className="my-4"/>
 
-                                {combinedResult.consolidatedTspResult?.route ? (
-                                    <div className="space-y-2">
-                                        <p><strong>Total Consolidated Distance:</strong> {combinedResult.consolidatedTspResult.route.distance.toFixed(2)} km</p>
-                                        <p><strong>Optimized Route for One Truck:</strong> {renderPath(combinedResult.consolidatedTspResult.route.path, combinedResult.deliveryAddressesForTsp.map(c=>c.address))}</p>
-                                    </div>
-                                ) : <p>Not enough stops for a TSP route.</p>}
-                            </div>
+                                <div className="space-y-4 p-4 border rounded-lg">
+                                    <h3 className="font-semibold">Predictive Delivery Time Estimation</h3>
+                                    <p className="text-sm text-muted-foreground">
+                                       Let the AI estimate the delivery duration for complex routes, considering factors like distance, number of stops, and simulated traffic.
+                                    </p>
+                                    <Button onClick={handlePredictDeliveryTimes} disabled={isPredicting || !combinedResult}>
+                                        {isPredicting ? 'Predicting...' : 'Predict Delivery Times'}
+                                    </Button>
 
-                            <div className="p-4 bg-green-50/50 rounded-lg border border-green-200">
-                                 <div className="flex justify-between items-start">
-                                    <div>
-                                        <h4 className="font-bold mb-2 flex items-center gap-2 text-green-800"><Package size={16}/> Strategy 3: Hybrid Batching by Warehouse</h4>
-                                        <p className="text-xs text-muted-foreground mb-3 pr-4">
-                                            A separate truck is dispatched from each required warehouse. Each truck runs an optimized mini-route for its assigned customers. A great balance of speed and cost.
-                                        </p>
-                                    </div>
-                                    <div className="text-right flex-shrink-0">
-                                        <p className="font-bold text-lg text-green-900">${combinedResult.totalCostStrategy3.toFixed(2)}</p>
-                                        <p className="text-xs text-muted-foreground">Total Cost</p>
-                                    </div>
+                                    {deliveryPredictions && (
+                                        <div className="mt-4 h-[250px]">
+                                          <h4 className="font-medium mb-2">Delivery Time Predictions (Hours):</h4>
+                                           <ResponsiveContainer width="100%" height="100%">
+                                             <BarChart data={deliveryPredictionChartData}>
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis dataKey="name" fontSize={10} interval={0} angle={-40} textAnchor="end" height={60} />
+                                                <YAxis />
+                                                <RechartsTooltip contentStyle={{ fontSize: '12px', borderRadius: '0.5rem' }}/>
+                                                <Legend wrapperStyle={{ fontSize: '12px' }}/>
+                                                <Bar dataKey="Predicted Time (AI)" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                                                <Bar dataKey="Simple Time (Distance-based)" fill="hsl(var(--muted-foreground))" radius={[4, 4, 0, 0]} />
+                                            </BarChart>
+                                          </ResponsiveContainer>
+                                        </div>
+                                    )}
                                 </div>
-
-                                {combinedResult.warehouseBatchResults.map((batch, index) => (
-                                    <div key={index} className="p-3 bg-white rounded-md border mb-3">
-                                        <div className="flex items-start justify-between mb-2">
-                                            <p className="font-bold text-primary flex items-center gap-2"><Warehouse size={14}/> Batch from <span className="text-green-800">{batch.warehouseName}</span></p>
-                                            <div className="text-right">
-                                                <p className="font-semibold text-xs">${batch.totalCost.toFixed(2)}</p>
-                                                <p className="text-xs text-muted-foreground">{batch.routes.length} truck(s)</p>
-                                            </div>
-                                        </div>
-                                        {batch.routes.map((truckRoute, truckIndex) => (
-                                        <div key={truckIndex} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-green-300">
-                                            <div className="flex items-center justify-between mb-2">
-                                                <p className="font-semibold text-primary/90 flex items-center gap-2"><Truck size={14}/> Truck {truckRoute.truck} Route</p>
-                                                <div className="flex items-center space-x-2">
-                                                    <RadioGroupItem value={`strategy-3-${batch.warehouseId}-${truckRoute.truck}`} id={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} />
-                                                    <Label htmlFor={`map-strat-3-${batch.warehouseId}-${truckRoute.truck}`} className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
-                                                </div>
-                                            </div>
-                                            <h5 className="font-semibold">Pickup Manifest:</h5>
-                                            <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                                {truckRoute.items.map((item, itemIndex) => (
-                                                    <li key={itemIndex}>
-                                                        <span className="font-semibold">{item.productName}</span> for <span className="font-semibold text-primary/80">{item.orderId}</span> (to {nodeMap.get(item.customerAddress)?.name})
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                            {truckRoute.route ? (
-                                                <div className="pt-2">
-                                                    <p><strong>Route Distance:</strong> {truckRoute.route.distance.toFixed(2)} km</p>
-                                                    <p><strong>Route Path:</strong> {renderPath(truckRoute.route.path, truckRoute.customers)}</p>
-                                                </div>
-                                            ) : <p className="text-destructive-foreground">Not enough stops for a route.</p>}
-                                        </div>
-                                        ))}
-                                    </div>
-                                ))}
-                            </div>
-                        </RadioGroup>
-
-                         <div className="p-4 bg-muted/50 rounded-lg border">
-                            <h4 className="font-bold mb-2 flex items-center gap-2"><Info size={16}/> Standalone Network Analysis</h4>
-                            <p className="text-xs text-muted-foreground mb-4">A theoretical calculation for network planning, focusing only on the roads for *your* order. It helps find bottlenecks.</p>
-                            <div >
-                                <h5 className="font-semibold flex items-center gap-2"><Zap size={16}/> Your Delivery Capacity (Max-Flow)</h5>
-                                {combinedResult.maxFlowToFirstCustomer !== null ? (
-                                    <>
-                                        <p>The shows the maximum number of packages that could be moved between the closest warehouse and your address per hour, if all roads were used optimally.</p>
-                                        <p><strong>Max Capacity:</strong> {combinedResult.maxFlowToFirstCustomer} packages/hour</p>
-                                    </>
-                                ) : <p>Your cart is empty. No capacity to calculate.</p>}
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+                </Tabs>
             )}
         </div>
       </div>

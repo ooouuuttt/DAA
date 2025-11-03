@@ -21,10 +21,12 @@ export {
     User,
     Eye,
     RefreshCw,
-    AlertTriangle
+    AlertTriangle,
+    BrainCircuit,
 } from 'lucide-react';
 
 
 
     
+
 
