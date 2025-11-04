@@ -465,18 +465,41 @@ export default function CheckoutPage() {
         };
     }
 
-    if (id.startsWith('strategy-3-') && combinedResult) {
-        const [_, __, warehouseId, truckNum] = id.split('-');
-        const batch = combinedResult.warehouseBatchResults.find(b => b.warehouseId === warehouseId);
-        const truckRoute = batch?.routes.find(r => r.truck === parseInt(truckNum));
-        
-        if (truckRoute && truckRoute.route) {
-            const warehouse = { id: batch.warehouseId, type: 'warehouse' as const };
-            const customers = truckRoute.customers.map(cId => ({ id: cId, type: 'customer' as const }));
+    // Strategy 1: individual shipments (pick a shipment to view)
+    if (id.startsWith('strategy-1-') && combinedResult) {
+        const rest = id.slice('strategy-1-'.length);
+        const parts = rest.split('-');
+        const orderId = parts.shift() || '';
+        const warehouseId = parts.join('-');
+        const order = combinedResult.allOrderShipments.find(o => o.orderId === orderId);
+        const shipment = order?.shipments.find(s => s.warehouseId === warehouseId);
+        if (shipment?.path?.path) {
+            const warehouse = { id: shipment.warehouseId, type: 'warehouse' as const };
+            const customer = { id: order!.address, type: 'customer' as const };
             return {
-                mapPath: truckRoute.route.path,
-                mapHighlights: [warehouse, ...customers]
+                mapPath: shipment.path.path,
+                mapHighlights: [warehouse, customer]
             };
+        }
+    }
+
+    // Strategy 3: per-warehouse truck routes (warehouseId may contain dashes, so parse from the end)
+    if (id.startsWith('strategy-3-') && combinedResult) {
+        const rest = id.slice('strategy-3-'.length);
+        const lastDash = rest.lastIndexOf('-');
+        if (lastDash > 0) {
+            const warehouseId = rest.slice(0, lastDash);
+            const truckNum = rest.slice(lastDash + 1);
+            const batch = combinedResult.warehouseBatchResults.find(b => b.warehouseId === warehouseId);
+            const truckRoute = batch?.routes.find(r => r.truck === parseInt(truckNum));
+            if (truckRoute && truckRoute.route && batch) {
+                const warehouse = { id: batch.warehouseId, type: 'warehouse' as const };
+                const customers = truckRoute.customers.map(cId => ({ id: cId, type: 'customer' as const }));
+                return {
+                    mapPath: truckRoute.route.path,
+                    mapHighlights: [warehouse, ...customers]
+                };
+            }
         }
     }
 
@@ -515,7 +538,7 @@ export default function CheckoutPage() {
                 nameEl = <span className="text-muted-foreground">{name}</span>;
             }
 
-            return <React.Fragment key={index}>{nameEl}{index < path.length - 1 ? <span className="text-muted-foreground/50"> -> </span> : ''}</React.Fragment>;
+            return <span key={index}>{nameEl}{index < path.length - 1 ? <span className="text-muted-foreground/50"> → </span> : null}</span>;
         })}
       </span>
     );
@@ -604,32 +627,36 @@ export default function CheckoutPage() {
                                       </div>
                                       
                                       {combinedResult.allOrderShipments.length > 0 ? (
-                                          combinedResult.allOrderShipments.map((order, orderIndex) => (
-                                              <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
-                                                  <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.id}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
-                                                  {order.shipments.map((shipment, index) => (
-                                                      <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
-                                                          <div className="flex justify-between items-center">
-                                                              <p className="font-medium text-primary">Shipment from {shipment.warehouseName}</p>
-                                                              <p className="font-semibold text-xs">${shipment.cost.toFixed(2)}</p>
+                                              combinedResult.allOrderShipments.map((order, orderIndex) => (
+                                                  <div key={orderIndex} className="p-3 bg-white rounded-md border mb-3">
+                                                      <p className="font-bold text-primary flex items-center gap-2 mb-2"><User size={14}/> Order for <span className="text-blue-800">{order.orderId}</span> to <span className="text-blue-800">{nodeMap.get(order.address)?.name}</span></p>
+                                                      {order.shipments.map((shipment, index) => (
+                                                          <div key={index} className="pl-4 border-l-2 ml-2 mb-3 space-y-1 border-blue-300">
+                                                              <div className="flex justify-between items-center">
+                                                                  <p className="font-medium text-primary">Shipment from {shipment.warehouseName}</p>
+                                                                  <div className="flex items-center space-x-2">
+                                                                      <RadioGroupItem value={`strategy-1-${order.orderId}-${shipment.warehouseId}`} id={`map-strat-1-${order.orderId}-${shipment.warehouseId}`} />
+                                                                      <Label htmlFor={`map-strat-1-${order.orderId}-${shipment.warehouseId}`} className="text-xs flex items-center gap-1.5 cursor-pointer"><Eye size={14}/> View on Map</Label>
+                                                                      <p className="font-semibold text-xs">${shipment.cost.toFixed(2)}</p>
+                                                                  </div>
+                                                              </div>
+                                                              <ul className="text-xs list-disc pl-5 text-muted-foreground">
+                                                                  {shipment.items.map((item, itemIndex) => (
+                                                                      <li key={itemIndex}>{item.name}</li>
+                                                                  ))}
+                                                              </ul>
+                                                              {shipment.path ? (
+                                                                  <>
+                                                                      <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
+                                                                  </>
+                                                              ) : <p className="text-destructive-foreground">No path found.</p>}
                                                           </div>
-                                                          <ul className="text-xs list-disc pl-5 text-muted-foreground">
-                                                              {shipment.items.map((item, itemIndex) => (
-                                                                  <li key={itemIndex}>{item.name}</li>
-                                                              ))}
-                                                          </ul>
-                                                          {shipment.path ? (
-                                                              <>
-                                                                  <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
-                                                              </>
-                                                          ) : <p className="text-destructive-foreground">No path found.</p>}
-                                                      </div>
-                                                  ))}
-                                              </div>
-                                          ))
-                                      ) : (
-                                          <p className="text-xs text-muted-foreground pl-4">No orders with items to ship.</p>
-                                      )}
+                                                      ))}
+                                                  </div>
+                                              ))
+                                          ) : (
+                                              <p className="text-xs text-muted-foreground pl-4">No orders with items to ship.</p>
+                                          )}
                                   </div>
                                   
                                   <div className="p-4 bg-muted/50 rounded-lg border">
