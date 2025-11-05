@@ -79,6 +79,7 @@ type SplitShipment = {
     warehouseId: string;
     warehouseName: string;
     path: DijkstraResult;
+    returnPath?: DijkstraResult;
     items: Product[];
     cost: number;
 }
@@ -192,11 +193,15 @@ export default function CheckoutPage() {
 
         const shipments: SplitShipment[] = Object.entries(itemsByWarehouse).map(([warehouseId, items]) => {
             const path = dijkstra(allNodes, currentEdges, warehouseId, order.address);
-            const cost = path ? (path.distance * COST_PER_KM) + COST_PER_TRUCK : 0;
+            const returnPath = dijkstra(allNodes, currentEdges, order.address, warehouseId);
+            // Cost includes outbound + inbound distances plus one truck fixed cost
+            const distanceSum = (path?.distance ?? 0) + (returnPath?.distance ?? 0);
+            const cost = (path || returnPath) ? (distanceSum * COST_PER_KM) + COST_PER_TRUCK : 0;
             return {
                 warehouseId,
                 warehouseName: nodeMap.get(warehouseId)?.name || 'Unknown Warehouse',
                 path,
+                returnPath,
                 items,
                 cost
             };
@@ -646,9 +651,27 @@ export default function CheckoutPage() {
                                                                   ))}
                                                               </ul>
                                                               {shipment.path ? (
-                                                                  <>
-                                                                      <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
-                                                                  </>
+                                                                  <div>
+                                                                      {shipment.returnPath ? (
+                                                                          (() => {
+                                                                              const outbound = shipment.path!.path;
+                                                                              const inbound = shipment.returnPath!.path;
+                                                                              const combined = [...outbound, ...inbound.slice(1)];
+                                                                              const totalDist = (shipment.path!.distance ?? 0) + (shipment.returnPath!.distance ?? 0);
+                                                                              return (
+                                                                                <>
+                                                                                  <p><strong>Total Roundtrip Distance:</strong> {totalDist.toFixed(2)} km</p>
+                                                                                  <p className="mt-1"><strong>Route:</strong> {renderPath(combined, [order.address])}</p>
+                                                                                </>
+                                                                              );
+                                                                          })()
+                                                                      ) : (
+                                                                          <>
+                                                                              <p><strong>Direct Distance:</strong> {shipment.path.distance.toFixed(2)} km</p>
+                                                                              <p className="mt-1"><strong>Route Path:</strong> {renderPath(shipment.path.path, [order.address])}</p>
+                                                                          </>
+                                                                      )}
+                                                                  </div>
                                                               ) : <p className="text-destructive-foreground">No path found.</p>}
                                                           </div>
                                                       ))}
